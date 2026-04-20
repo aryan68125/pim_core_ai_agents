@@ -2,6 +2,10 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from pim_core.utils.all_agents import AllAgents
+
+AGENT_KEY = AllAgents.PRODUCT_DESCRIPTION_GENERATOR.value
+
 
 @pytest.mark.asyncio
 async def test_generate_description_returns_result(sample_product, sample_brand_voice):
@@ -15,7 +19,10 @@ async def test_generate_description_returns_result(sample_product, sample_brand_
     with patch(
         "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
         new_callable=AsyncMock,
-    ) as mock_llm:
+    ) as mock_llm, patch(
+        "agents.product_description_generator.tools.generate_description.agent_model_registry.get",
+        return_value="claude-sonnet-4-6",
+    ):
         mock_llm.return_value = mock_response
 
         from agents.product_description_generator.tools.generate_description import generate_description
