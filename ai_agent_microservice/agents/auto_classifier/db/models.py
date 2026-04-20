@@ -1,111 +1,89 @@
-import enum
-from datetime import datetime
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import (
-    Boolean, DateTime, Enum, Float, ForeignKey,
-    Index, Integer, String, Text, func,
-)
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from agents.auto_classifier.db.base import Base
 
 
-class TaxonomyType(str, enum.Enum):
-    gs1 = "gs1"
-    eclass = "eclass"
-    custom = "custom"
-
-
-class ClassificationStage(str, enum.Enum):
-    embedding = "embedding"
-    llm_tier2 = "llm_tier2"
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class TaxonomyNode(Base):
+    """Pre-embedded taxonomy categories — GS1 / eCl@ss / custom (loaded in v2)."""
+
     __tablename__ = "taxonomy_nodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(100), nullable=False)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-    taxonomy_type: Mapped[TaxonomyType] = mapped_column(Enum(TaxonomyType), nullable=False)
-    parent_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    breadcrumb: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    __table_args__ = (
-        Index("uq_taxonomy_code_type", "code", "taxonomy_type", unique=True),
-        Index("ix_taxonomy_type", "taxonomy_type"),
-        Index(
-            "ix_taxonomy_embedding",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_with={"m": 16, "ef_construction": 64},
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
-    )
+    taxonomy_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    breadcrumb: Mapped[str | None] = mapped_column(Text, nullable=True)
+    depth: Mapped[int] = mapped_column(Integer, default=0)
+    embedding: Mapped[list | None] = mapped_column(Vector(1536), nullable=True)
 
 
 class ClassificationResult(Base):
+    """Every classification decision — one row per request."""
+
     __tablename__ = "classification_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    product_text: Mapped[str] = mapped_column(Text, nullable=False)
-    taxonomy_type: Mapped[TaxonomyType] = mapped_column(Enum(TaxonomyType), nullable=False)
-    stage: Mapped[ClassificationStage] = mapped_column(Enum(ClassificationStage), nullable=False)
-    chosen_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    chosen_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    requires_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    service_account_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("service_accounts.id"), nullable=True
+    product_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    taxonomy_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)  # embedding_accept | llm_tier1/2/3
+    code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    reasoning: Mapped[str] = mapped_column(Text, default="")
+    model_used: Mapped[str] = mapped_column(String(64), nullable=False)
+    hitl_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    corrections: Mapped[list[Correction]] = relationship("Correction", back_populates="result")
 
 
 class Correction(Base):
+    """Human override — feeds the accuracy improvement loop."""
+
     __tablename__ = "corrections"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     result_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("classification_results.id"), nullable=False
+        ForeignKey("classification_results.id"), nullable=False, index=True
     )
-    correct_code: Mapped[str] = mapped_column(String(100), nullable=False)
-    correct_name: Mapped[str] = mapped_column(Text, nullable=False)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    correct_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    correct_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    corrected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+
+    result: Mapped[ClassificationResult] = relationship(
+        "ClassificationResult", back_populates="corrections"
+    )
 
 
 class ClassificationAudit(Base):
+    """Append-only audit log — every decision is traceable."""
+
     __tablename__ = "classification_audit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    result_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("classification_results.id"), nullable=False
+    result_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False, index=True
     )
-    event: Mapped[str] = mapped_column(String(50), nullable=False)
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-
-class TaxonomyLoad(Base):
-    __tablename__ = "taxonomy_loads"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    taxonomy_type: Mapped[TaxonomyType] = mapped_column(Enum(TaxonomyType), nullable=False)
-    node_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class ServiceAccount(Base):
-    __tablename__ = "service_accounts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    hashed_secret: Mapped[str] = mapped_column(Text, nullable=False)
-    scopes: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    @classmethod
+    def from_dict(cls, result_id: int | None, event: str, payload: dict) -> "ClassificationAudit":
+        return cls(result_id=result_id, event=event, payload=json.dumps(payload))

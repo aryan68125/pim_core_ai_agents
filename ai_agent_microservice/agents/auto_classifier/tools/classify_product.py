@@ -1,101 +1,119 @@
 from __future__ import annotations
 
+import json
+
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agents.auto_classifier.audit.logger import write_audit_record
 from agents.auto_classifier.cache.redis_cache import get_cached, set_cached
-from agents.auto_classifier.config import get_classifier_settings
-from agents.auto_classifier.db.models import ClassificationResult, ClassificationStage, TaxonomyType
-from agents.auto_classifier.schemas.response import CategoryCandidate, ClassifyResult
+from agents.auto_classifier.config import settings
+from agents.auto_classifier.db.models import ClassificationAudit, ClassificationResult
+from agents.auto_classifier.schemas.response import ClassifyResult
+from agents.auto_classifier.tier_router import get_tier
+from agents.auto_classifier.tools.embed_product import embed_product, search_taxonomy
 from agents.auto_classifier.workflows.classification_workflow import classification_graph
+
+logger = structlog.get_logger()
 
 
 async def classify_product(
-    product_text: str,
+    product,
     taxonomy_type: str,
-    top_k: int,
-    min_confidence: float | None,
     session: AsyncSession,
-    service_account_id: int | None = None,
 ) -> ClassifyResult:
-    settings = get_classifier_settings()
-
-    # Cache check
-    cached = await get_cached(product_text, taxonomy_type, top_k)
+    # 1. Redis cache hit → return immediately
+    cached = await get_cached(product.id, taxonomy_type)
     if cached:
+        logger.info("cache_hit", product_id=product.id)
         return ClassifyResult(**cached)
 
-    # Run the LangGraph classification workflow
+    # 2. Embed product text → pgvector similarity search (Stage 2)
+    candidates: list[dict] = []
+    try:
+        embedding = await embed_product(product)
+        candidates = await search_taxonomy(embedding, taxonomy_type, session)
+    except Exception as exc:
+        logger.warning("embedding_skipped", error=str(exc))
+
+    # 3. Determine LLM tier from product complexity
+    tier, model = get_tier(product)
+
+    # 4. Run LangGraph: embedding-accept or tiered LLM
     state = await classification_graph.ainvoke({
-        "product_text": product_text,
+        "product": product,
         "taxonomy_type": taxonomy_type,
-        "top_k": top_k,
-        "session": session,
-        "candidates": [],
-        "chosen_code": None,
-        "chosen_name": None,
+        "candidates": candidates,
+        "tier": tier,
+        "model": model,
+        "code": None,
+        "name": None,
         "confidence": 0.0,
         "reasoning": "",
-        "stage": "embedding",
+        "stage": "",
         "error": None,
     })
 
     if state.get("error"):
         raise ValueError(state["error"])
 
-    effective_threshold = min_confidence if min_confidence is not None else settings.confidence_hitl_threshold
-    requires_review = state["confidence"] < effective_threshold or state["chosen_code"] is None
+    # 5. HITL determination
+    hitl_required = state["confidence"] < settings.confidence_write or state["code"] is None
 
-    stage_enum = ClassificationStage.embedding if state["stage"] == "embedding" else ClassificationStage.llm_tier2
-
+    # 6. Persist classification result
     db_result = ClassificationResult(
-        product_text=product_text,
-        taxonomy_type=TaxonomyType(taxonomy_type),
-        stage=stage_enum,
-        chosen_code=state["chosen_code"],
-        chosen_name=state["chosen_name"],
+        product_id=product.id,
+        taxonomy_type=taxonomy_type,
+        stage=state["stage"],
+        code=state["code"],
+        name=state["name"],
         confidence=state["confidence"],
-        requires_review=requires_review,
-        service_account_id=service_account_id,
+        reasoning=state["reasoning"],
+        model_used=model,
+        hitl_required=hitl_required,
     )
     session.add(db_result)
     await session.commit()
     await session.refresh(db_result)
 
-    await write_audit_record(
-        session=session,
+    # 7. Append-only audit record
+    audit = ClassificationAudit.from_dict(
         result_id=db_result.id,
         event="classify",
         payload={
             "stage": state["stage"],
+            "tier": tier,
+            "model": model,
             "confidence": state["confidence"],
-            "requires_review": requires_review,
-            "reasoning": state["reasoning"],
+            "hitl_required": hitl_required,
+            "candidates_count": len(candidates),
         },
     )
+    session.add(audit)
+    await session.commit()
 
-    output = ClassifyResult(
-        result_id=db_result.id,
-        product_text=product_text,
-        taxonomy_type=taxonomy_type,
-        stage=state["stage"],
-        candidates=[
-            CategoryCandidate(
-                code=c["code"],
-                name=c["name"],
-                breadcrumb=c["breadcrumb"],
-                score=c["score"],
-            )
-            for c in state["candidates"]
-        ],
-        chosen_code=state["chosen_code"],
-        chosen_name=state["chosen_name"],
+    logger.info(
+        "classified",
+        product_id=product.id,
+        code=state["code"],
         confidence=state["confidence"],
-        requires_review=requires_review,
-        reasoning=state["reasoning"],
+        stage=state["stage"],
+        hitl_required=hitl_required,
     )
 
-    if not requires_review:
-        await set_cached(product_text, taxonomy_type, top_k, output.model_dump(), ttl=settings.cache_ttl_seconds)
+    result = ClassifyResult(
+        product_id=product.id,
+        taxonomy_type=taxonomy_type,
+        code=state["code"],
+        name=state["name"],
+        confidence=state["confidence"],
+        reasoning=state["reasoning"],
+        model_used=model,
+        stage=state["stage"],
+        hitl_required=hitl_required,
+    )
 
-    return output
+    # 8. Cache only confident results
+    if not hitl_required:
+        await set_cached(product.id, taxonomy_type, result.model_dump())
+
+    return result
