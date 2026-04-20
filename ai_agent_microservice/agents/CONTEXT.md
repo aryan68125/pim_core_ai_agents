@@ -6,7 +6,7 @@ Each subdirectory is a self-contained FastAPI microservice for one PIM-AI agent.
 
 | Agent | Port | Purpose |
 |-------|------|---------|
-| `content/` | 8002 | Content & Enrichment — generates product descriptions, enriches sparse records |
+| `product_description_generator/` | 8002 | Generates SEO-optimised product descriptions from raw PIM records |
 
 ## Planned agents (future)
 
@@ -26,5 +26,13 @@ Every agent directory contains:
 
 ## Agent identity in the model registry
 
-The agent name string used in `AgentModelRegistry` matches the directory name.
-Content agent → `"content"`. Catalog agent (future) → `"catalog"`.
+The agent name string used in `AgentModelRegistry` matches the directory name and the value
+of the corresponding `AllAgents` enum entry.
+
+**Register a new agent in `pim_core/utils/all_agents.py` first** before writing any code.
+
+| Directory | Registry key (`AllAgents` enum value) |
+|-----------|---------------------------------------|
+| `product_description_generator/` | `"product_description_generator"` |
+| `catalog/` _(planned)_ | `"catalog"` |
+| `procurement/` _(planned)_ | `"procurement"` |
