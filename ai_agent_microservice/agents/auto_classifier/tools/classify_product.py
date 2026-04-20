@@ -30,8 +30,8 @@ async def classify_product(
     state = await classification_graph.ainvoke({
         "product": product,
         "taxonomy_type": taxonomy_type,
+        "category_path": None,
         "code": None,
-        "name": None,
         "confidence": 0.0,
         "reasoning": "",
         "error": None,
@@ -40,7 +40,7 @@ async def classify_product(
     if state.get("error"):
         raise ValueError(state["error"])
 
-    hitl_required = state["confidence"] < settings.confidence_write or state["code"] is None
+    hitl_required = state["confidence"] < settings.confidence_write or state["category_path"] is None
 
     # 3. Persist result
     db_result = ClassificationResult(
@@ -48,7 +48,7 @@ async def classify_product(
         taxonomy_type=taxonomy_type,
         stage="llm",
         code=state["code"],
-        name=state["name"],
+        name=state["category_path"],
         confidence=state["confidence"],
         reasoning=state["reasoning"],
         model_used=settings.classifier_model,
@@ -82,12 +82,11 @@ async def classify_product(
     result = ClassifyResult(
         product_id=db_result.product_id,
         taxonomy_type=taxonomy_type,
+        category_path=state["category_path"],
         code=state["code"],
-        name=state["name"],
         confidence=state["confidence"],
         reasoning=state["reasoning"],
         model_used=settings.classifier_model,
-        stage="llm",
         hitl_required=hitl_required,
     )
 

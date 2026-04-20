@@ -6,10 +6,9 @@ from pydantic import BaseModel
 class ClassifyResult(BaseModel):
     product_id: str
     taxonomy_type: str
-    code: str | None
-    name: str | None
+    category_path: str | None    # e.g. "Electronics > Computers > Desktop Computers"
+    code: str | None             # GS1/eCl@ss code — null for custom taxonomy
     confidence: float
     reasoning: str
     model_used: str
-    stage: str = ""
     hitl_required: bool = False

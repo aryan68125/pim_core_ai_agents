@@ -18,8 +18,8 @@ AGENT_NAME = "auto_classifier"
 class ClassificationState(TypedDict):
     product: dict[str, Any]
     taxonomy_type: str
+    category_path: str | None
     code: str | None
-    name: str | None
     confidence: float
     reasoning: str
     error: str | None
@@ -40,8 +40,8 @@ async def classify_node(state: ClassificationState) -> dict:
         )
         parsed = json.loads(raw)
         return {
+            "category_path": parsed.get("category_path"),
             "code": parsed.get("code"),
-            "name": parsed.get("name"),
             "confidence": float(parsed.get("confidence", 0.0)),
             "reasoning": parsed.get("reasoning", ""),
             "error": None,
@@ -49,8 +49,8 @@ async def classify_node(state: ClassificationState) -> dict:
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
         logger.error("classify_failed", error=str(exc))
         return {
+            "category_path": None,
             "code": None,
-            "name": None,
             "confidence": 0.0,
             "reasoning": "Failed to parse LLM response",
             "error": str(exc),

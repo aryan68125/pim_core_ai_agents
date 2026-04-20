@@ -1,32 +1,38 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
+# Fields that are never useful for classification — internal system fields
+_SKIP_FIELDS = {
+    "productID", "id", "shortSku", "sku", "vendorStyle", "upc", "isbnEan",
+    "reclassToSKU", "reclassToProductID", "ipVendorID", "ipVendorNumber",
+    "ipStyle", "ipSize", "ipColor", "brandID", "prodManufacturerID",
+    "coordGroupID", "coordGroup", "deckID", "deck", "filler", "buyerID",
+    "buyerFirstName", "buyerLastName", "buyerIPUser", "buyerAssociateID",
+    "dateCreated", "lastModifiedOn", "firstShipDate", "firstActivityDate",
+    "streetDate", "adEmbargo", "asteaWarranty", "accountCode",
+    "isActive", "isAnItemSet", "pageCount",
+}
+
 _SYSTEM_PROMPT = """\
-You are a product category classifier for a PIM (Product Information Management) system.
+You are a product category classifier for a PIM system.
 
-Your job:
-1. Understand what the product is from whatever data is provided
-2. Assign the most accurate category based on the taxonomy standard requested
+Given a product in JSON format, identify what the product is and classify it into the most accurate category.
 
-Rules:
-- Analyse ALL provided product fields to understand what the product is
-- Ignore empty, null, or irrelevant fields
-- Return ONLY valid JSON — no extra text
+Return ONLY this JSON — no other text:
+{
+  "category_path": "<top level> > <mid level> > <specific category>",
+  "code": "<taxonomy code or null>",
+  "confidence": <0.0 to 1.0>,
+  "reasoning": "<one sentence why>"
+}
 
-Response format:
-{"code": "<category_code>", "name": "<category_name>", "confidence": <0.0-1.0>, "reasoning": "<brief reason>"}
-
-Taxonomy behaviour:
-- GS1: Return the official GS1 Global Product Classification code and full category name
-- eCl@ss: Return the official eCl@ss code and category name
-- custom: Return code as null — return a clear, logical category name based on what the product is
-
-Confidence guide:
-- 0.90-1.0: Product is clearly identifiable, category is obvious
-- 0.70-0.89: Good match but some ambiguity in product data
-- 0.50-0.69: Limited product data, best guess
-- Below 0.50: Very unclear product, low confidence\
+Notes:
+- category_path must always be a hierarchical path using " > " as separator
+- For GS1 and eCl@ss: fill code from your knowledge of that standard
+- For custom taxonomy: set code to null, focus on a clear descriptive category_path
+- confidence reflects how clearly the product data identifies the category\
 """
 
 
@@ -34,24 +40,29 @@ def get_system_prompt() -> str:
     return _SYSTEM_PROMPT
 
 
+def _clean_product(product: dict[str, Any]) -> dict[str, Any]:
+    """Remove empty, zero, internal-system fields. Keep only what describes the product."""
+    cleaned = {}
+    for k, v in product.items():
+        if k in _SKIP_FIELDS:
+            continue
+        if v is None or v == "" or v == 0 or v == 0.0 or v is False:
+            continue
+        # Skip attribute fields that are empty (attribute1..attribute99)
+        if k.startswith("attribute") and k[9:].isdigit():
+            continue
+        # Skip image/copy fields with no value
+        if k.startswith(("image", "copy")) and not v:
+            continue
+        cleaned[k] = v
+    return cleaned
+
+
 def get_user_message(product: dict[str, Any], taxonomy_type: str) -> str:
-    # Extract all non-empty fields from whatever the client sends
-    filled = {
-        k: v
-        for k, v in product.items()
-        if v is not None and v != "" and v != 0 and v is not False
-    }
-
-    product_lines = "\n".join(f"  {k}: {v}" for k, v in filled.items())
-
-    taxonomy_instruction = {
-        "gs1": "Classify into the GS1 Global Product Classification standard. Return the GS1 segment/family/class/brick code and name.",
-        "eclass": "Classify into the eCl@ss standard. Return the eCl@ss code and name.",
-        "custom": "Classify into a logical category based on what this product is. Return code as null and a clear descriptive category name.",
-    }.get(taxonomy_type, f"Classify into the {taxonomy_type.upper()} taxonomy standard.")
+    cleaned = _clean_product(product)
+    product_json = json.dumps(cleaned, indent=2, default=str)
 
     return (
-        f"Product data:\n{product_lines}\n\n"
-        f"Taxonomy: {taxonomy_type.upper()}\n"
-        f"{taxonomy_instruction}"
+        f"Taxonomy: {taxonomy_type.upper()}\n\n"
+        f"Product:\n{product_json}"
     )
