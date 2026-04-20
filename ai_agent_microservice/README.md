@@ -17,6 +17,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 9. [Architecture Diagram](#9-architecture-diagram)
 10. [Theory and References](#10-theory-and-references)
 11. [Running Tests](#11-running-tests)
+12. [Knowledge Graph (graphify)](#12-knowledge-graph-graphify)
 
 ---
 
@@ -721,3 +722,90 @@ venv/bin/python -m pytest --cov=. --cov-report=term-missing
 Expected output: **48 passed**.
 
 No real API calls are made during tests. All LLM interactions are mocked.
+
+---
+
+## 12. Knowledge Graph (graphify)
+
+The project uses [graphify](https://github.com/safishamsi/graphify) to maintain a navigable knowledge graph of the entire codebase, documentation, and knowledge base. The graph lives in `graphify-out/` at the project root (one level above `ai_agent_microservice/`).
+
+### What it produces
+
+| Output file | What it is |
+|---|---|
+| `graphify-out/graph.html` | Interactive graph — open in any browser, no server needed |
+| `graphify-out/graph.json` | Raw graph data for programmatic querying |
+| `graphify-out/GRAPH_REPORT.md` | Audit report: god nodes, surprising connections, suggested questions |
+
+### Installation
+
+graphify is a separate Python tool installed globally (not inside the project venv):
+
+```bash
+pip install graphifyy
+```
+
+Verify it installed correctly:
+
+```bash
+python3 -c "import graphify; print('ok')"
+```
+
+### Build the graph for the first time
+
+Run from the **project root** (`pim_core_ai_agents/`), not from inside `ai_agent_microservice/`:
+
+```bash
+cd ..                  # move to pim_core_ai_agents/ if you're inside ai_agent_microservice/
+/graphify .            # or: claude --skill graphify .
+```
+
+This scans all 65+ files (Python source, Markdown docs, PDFs, SVG diagrams), runs AST extraction on code files, and runs semantic extraction (via Claude) on documents. Outputs are written to `graphify-out/`.
+
+### Update the graph after making changes
+
+After editing files or adding new files:
+
+```bash
+/graphify . --update
+```
+
+graphify compares the current project state against its stored manifest and only re-extracts files that changed:
+
+| Change type | Re-extraction needed | LLM call? |
+|---|---|---|
+| Python file modified | AST only | No |
+| `.md` / `.txt` / `.pdf` added or changed | Semantic extraction | Yes (costs tokens) |
+| File deleted | Ghost nodes pruned automatically | No |
+| No changes since last run | Exits immediately with "Nothing to update" | No |
+
+The manifest and extraction cache are stored in `graphify-out/`. Do not delete this folder between runs — it is what makes incremental updates fast and cheap.
+
+### Full rebuild from scratch
+
+Only needed if the graph has become significantly out of date or corrupted:
+
+```bash
+rm -rf graphify-out/
+/graphify .
+```
+
+### Querying the graph
+
+Once built, you can ask questions about the codebase directly:
+
+```bash
+/graphify query "how does model switching work"
+/graphify query "what connects BrandVoice to the LLM call"
+/graphify path "AgentModelRegistry" "AnthropicProvider"
+/graphify explain "get_provider"
+```
+
+### Current graph stats
+
+The graph as of the last run covers:
+
+- **367 nodes** — code symbols, documentation concepts, design decisions, business signals
+- **516 edges** — 66% extracted directly from source, 34% inferred by Claude
+- **14 meaningful communities** — Content Agent Runtime, LLM Provider Layer, Model Config & Registry, Prompt Engineering, Agent Development Roadmap, Customer & Business Signals, and more
+- **Top god nodes:** `BrandVoice` (20 edges), `Product` (19), `AgentModelRegistry` (17), `get_provider()` (12)
