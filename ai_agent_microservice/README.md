@@ -165,61 +165,6 @@ Response:
 
 ---
 
-### Generate a product description
-
-```
-POST /generate-description
-Content-Type: application/json
-```
-
-Request body:
-
-```json
-{
-  "product": {
-    "id": "prod-001",
-    "sku": "WH-BLK-001",
-    "name": "Wireless Noise-Cancelling Headphones",
-    "category": "Electronics",
-    "attributes": {
-      "color": "Midnight Black",
-      "brand": "SoundCore",
-      "battery": "30h",
-      "material": "Premium leather"
-    },
-    "existing_description": null,
-    "image_urls": []
-  },
-  "channel": "ecommerce",
-  "brand_voice": {
-    "tone": "professional",
-    "keywords": ["wireless", "noise cancelling", "premium audio"],
-    "avoid_words": ["cheap", "budget"],
-    "max_title_length": 80,
-    "max_description_length": 500,
-    "locale": "en-GB"
-  }
-}
-```
-
-`brand_voice` is optional. If omitted, sensible defaults are used.
-
-Response:
-
-```json
-{
-  "product_id": "prod-001",
-  "channel": "ecommerce",
-  "title": "SoundCore Wireless Noise-Cancelling Headphones — Midnight Black",
-  "description": "Experience immersive premium audio with SoundCore's flagship wireless headphones...",
-  "seo_keywords": ["wireless headphones", "noise cancelling", "premium audio"],
-  "word_count": 48,
-  "model_used": "claude-sonnet-4-6"
-}
-```
-
----
-
 ---
 
 ### Generate a description directly from a PIM record
@@ -283,7 +228,7 @@ Request body:
 
 `existing_description` is set to the first of `copy1`, `productDescription`, `posDescription` that is non-empty **and** different from the product name (to avoid sending the LLM a description that just repeats the name).
 
-Response is the same `DescriptionResult` as `POST /generate-description`.
+Returns a `DescriptionResult` — same schema as shown above.
 
 ---
 
@@ -378,12 +323,13 @@ curl -X POST http://localhost:8002/agents/product_description_generator/model \
   -d '{"model": "gpt-4o"}'
 
 # 2. Generate description (now uses GPT-4o)
-curl -X POST http://localhost:8002/generate-description \
+curl -X POST http://localhost:8001/agents/generate-description \
   -H "Content-Type: application/json" \
   -d '{
-    "product": {
-      "id": "p1", "sku": "SKU-001",
-      "name": "Standing Desk", "category": "Furniture"
+    "pim_record": {
+      "productID": 1,
+      "productName": "Standing Desk",
+      "coordGroupDescription": "Furniture"
     },
     "channel": "wholesale"
   }'
@@ -500,7 +446,7 @@ Wraps `openai.AsyncOpenAI`. Uses lazy imports — the `openai` package is not im
 Wraps `google.generativeai`. Same lazy import pattern as OpenAI. Converts the shared message format into Gemini's format (role must be `"user"` or `"model"`, content goes in a `parts` array).
 
 **`agents/product_description_generator/main.py`**
-The FastAPI application entry point for the Product Description Generator. Mounts the PIM ingest and agent registry routers and defines the `POST /generate-description` endpoint. Thin — all logic lives in the tool and workflow layers below.
+The FastAPI application entry point for the Product Description Generator. Mounts the PIM ingest router (`POST /agents/generate-description`) and the agent registry router. Thin — all logic lives in the tool and workflow layers below.
 
 **`agents/product_description_generator/workflows/description_workflow.py`**
 A LangGraph `StateGraph` with a single node: `generate_node`. This node reads the current model from the registry, builds the prompt, calls the LLM via `LLMClient`, and parses the JSON response. Errors are caught inside the node and stored in `state["error"]` rather than being raised — this keeps the graph always terminating cleanly.
@@ -554,9 +500,10 @@ Wraps the graph in a FastMCP `@mcp.tool()` decorated function. Initialises the s
 
 **FastAPI app (`agents/product_description_generator/main.py`)**
 
-Exposes two endpoints:
+Exposes one endpoint:
 - `GET /health` — liveness check
-- `POST /generate-description` — accepts `GenerateDescriptionRequest` (product + channel + optional brand_voice), delegates to the tool, returns `DescriptionResult`
+
+The `POST /agents/generate-description` endpoint is mounted via the PIM ingest router.
 
 **Tests written in Phase 1 (34 tests):**
 - `test_brand_voice.py` — 10 tests covering prompt builder output
