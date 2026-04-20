@@ -302,7 +302,7 @@ ai_agent_microservice/
 │           └── google_provider.py      # Google Gemini implementation (lazy import)
 │
 ├── agents/
-│   └── content/                  # Content Agent — generates product descriptions
+│   └── product_description_generator/  # Product Description Generator Agent
 │       ├── main.py               # FastAPI app — mounts routes, defines /generate-description
 │       ├── routes/
 │       │   └── model_config.py   # GET/POST /config/model — runtime model switching API
@@ -320,7 +320,7 @@ ai_agent_microservice/
     ├── test_llm_client.py        # LLMClient delegation tests
     ├── test_llm_factory.py       # Provider routing and caching tests
     ├── test_llm_registry.py      # AgentModelRegistry behaviour tests
-    └── content/
+    └── product_description_generator/
         ├── test_brand_voice.py              # Prompt builder output tests
         ├── test_description_workflow.py     # LangGraph graph node tests
         ├── test_generate_description_tool.py # MCP tool integration tests
@@ -871,7 +871,7 @@ pim_core/                          ← SHARED — used by ALL agents
         └── google_provider.py         Gemini
 
 agents/
-├── content/                       ← PRODUCT DESCRIPTION GENERATOR only
+├── product_description_generator/ ← PRODUCT DESCRIPTION GENERATOR only
 │   ├── main.py
 │   ├── routes/model_config.py
 │   ├── tools/generate_description.py
