@@ -11,6 +11,31 @@ AGENT_KEY = AllAgents.PRODUCT_DESCRIPTION_GENERATOR.value
 
 
 # ---------------------------------------------------------------------------
+# Isolation fixture — runs automatically around every test in this file.
+#
+# Two things it does:
+#   1. Patches agent_model_db.upsert / delete so no test touches the real
+#      SQLite database (agent_models.db). Without this, running pytest
+#      overwrites whatever model the operator set manually via the API.
+#   2. Saves the in-memory registry state before each test and restores it
+#      afterward, so tests that call the real FastAPI app (which mutates the
+#      singleton registry) don't bleed into subsequent tests.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def isolate_registry(monkeypatch):
+    import pim_core.db.agent_model_db as db
+    monkeypatch.setattr(db, "upsert", lambda *_: None)
+    monkeypatch.setattr(db, "delete", lambda *_: None)
+
+    from pim_core.llm.registry import agent_model_registry
+    saved = dict(agent_model_registry._registry)
+    yield
+    agent_model_registry._registry.clear()
+    agent_model_registry._registry.update(saved)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -62,7 +87,7 @@ async def test_list_available_models_google_contains_gemini():
 
 
 # ---------------------------------------------------------------------------
-# POST /agents/{agent_name}/model
+# POST /agents-settings/{agent_name}/model
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -70,7 +95,7 @@ async def test_set_agent_model_returns_200_for_valid_claude_model():
     with patch("agents.product_description_generator.routes.agent_registry.get_provider"):
         async with await _client() as client:
             response = await client.post(
-                f"/agents/{AGENT_KEY}/model",
+                f"/agents-settings/{AGENT_KEY}/model",
                 json={"model": "claude-sonnet-4-6"},
             )
     assert response.status_code == 200
@@ -84,7 +109,7 @@ async def test_set_agent_model_returns_200_for_openai_model():
     with patch("agents.product_description_generator.routes.agent_registry.get_provider"):
         async with await _client() as client:
             response = await client.post(
-                "/agents/catalog/model",
+                "/agents-settings/catalog/model",
                 json={"model": "gpt-4o"},
             )
     assert response.status_code == 200
@@ -97,7 +122,7 @@ async def test_set_agent_model_returns_200_for_google_model():
     with patch("agents.product_description_generator.routes.agent_registry.get_provider"):
         async with await _client() as client:
             response = await client.post(
-                "/agents/procurement/model",
+                "/agents-settings/procurement/model",
                 json={"model": "gemini-2.0-flash"},
             )
     assert response.status_code == 200
@@ -108,7 +133,7 @@ async def test_set_agent_model_returns_200_for_google_model():
 async def test_set_agent_model_returns_400_for_unknown_model():
     async with await _client() as client:
         response = await client.post(
-            "/agents/content/model",
+            "/agents-settings/content/model",
             json={"model": "unknown-model-xyz"},
         )
     assert response.status_code == 400
@@ -120,27 +145,27 @@ async def test_set_agent_model_writes_to_registry():
     with patch("agents.product_description_generator.routes.agent_registry.get_provider"):
         async with await _client() as client:
             await client.post(
-                "/agents/test-agent/model",
+                "/agents-settings/test-agent/model",
                 json={"model": "claude-sonnet-4-6"},
             )
     assert agent_model_registry.get("test-agent") == "claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------
-# GET /agents/models
+# GET /agents-settings/models
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_get_all_agent_models_returns_200():
     async with await _client() as client:
-        response = await client.get("/agents/models")
+        response = await client.get("/agents-settings/models")
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
 async def test_get_all_agent_models_contains_registry_and_default():
     async with await _client() as client:
-        response = await client.get("/agents/models")
+        response = await client.get("/agents-settings/models")
     data = response.json()
     assert "registry" in data
     assert "default_model" in data
@@ -153,12 +178,12 @@ async def test_get_all_agent_models_reflects_assignment():
     from pim_core.llm.registry import agent_model_registry
     agent_model_registry.set("visibility-test-agent", "gpt-4o-mini")
     async with await _client() as client:
-        response = await client.get("/agents/models")
+        response = await client.get("/agents-settings/models")
     assert response.json()["registry"].get("visibility-test-agent") == "gpt-4o-mini"
 
 
 # ---------------------------------------------------------------------------
-# DELETE /agents/{agent_name}/model
+# DELETE /agents-settings/{agent_name}/model
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
@@ -166,7 +191,7 @@ async def test_reset_agent_model_returns_200():
     from pim_core.llm.registry import agent_model_registry
     agent_model_registry.set("reset-agent", "gpt-4o")
     async with await _client() as client:
-        response = await client.delete("/agents/reset-agent/model")
+        response = await client.delete("/agents-settings/reset-agent/model")
     assert response.status_code == 200
 
 
@@ -175,7 +200,7 @@ async def test_reset_agent_model_reverts_to_default():
     from pim_core.llm.registry import agent_model_registry
     agent_model_registry.set("revert-agent", "gpt-4o")
     async with await _client() as client:
-        response = await client.delete("/agents/revert-agent/model")
+        response = await client.delete("/agents-settings/revert-agent/model")
     data = response.json()
     assert data["agent"] == "revert-agent"
     assert data["model"] == response.json()["model"]

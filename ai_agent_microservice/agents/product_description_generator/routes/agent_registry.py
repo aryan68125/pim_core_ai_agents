@@ -12,7 +12,7 @@ from pim_core.utils.all_available_models import (
     AllAvailableModelsOpenAI,
 )
 
-router = APIRouter(tags=["agent-registry"])
+router = APIRouter(tags=["agent-settings"])
 
 # ---------------------------------------------------------------------------
 # Model catalogue — derived entirely from enums, no hardcoded strings.
@@ -65,7 +65,7 @@ async def list_available_models() -> AvailableModelsResponse:
     return AvailableModelsResponse(**AVAILABLE_MODELS)
 
 
-@router.post("/agents/{agent_name}/model", response_model=AgentModelResponse)
+@router.post("/agents-settings/{agent_name}/model", response_model=AgentModelResponse)
 async def set_agent_model(
     agent_name: str,
     request: SetAgentModelRequest,
@@ -94,7 +94,7 @@ async def set_agent_model(
     return AgentModelResponse(agent=agent_name, model=request.model)
 
 
-@router.get("/agents/models", response_model=AllAgentModelsResponse)
+@router.get("/agents-settings/models", response_model=AllAgentModelsResponse)
 async def get_all_agent_models() -> AllAgentModelsResponse:
     """Return every agent's current model assignment and the global default.
 
@@ -107,7 +107,7 @@ async def get_all_agent_models() -> AllAgentModelsResponse:
     )
 
 
-@router.delete("/agents/{agent_name}/model", response_model=AgentModelResponse)
+@router.delete("/agents-settings/{agent_name}/model", response_model=AgentModelResponse)
 async def reset_agent_model(agent_name: str) -> AgentModelResponse:
     """Remove the explicit model assignment for an agent, reverting to the default.
 

@@ -23,9 +23,9 @@ POST /agents/generate-description       ← accepts a raw PIM export record
 |-------|------|---------|
 | `POST /agents/generate-description` | `routes/product_description_generator_api_route.py` | Accepts a raw PIM record, adapts it, then generates |
 | `GET  /models/available` | `routes/agent_registry.py` | List all supported models by provider |
-| `POST /agents/{name}/model` | `routes/agent_registry.py` | Assign any model to any agent by name |
-| `GET  /agents/models` | `routes/agent_registry.py` | View all agent → model assignments + default |
-| `DELETE /agents/{name}/model` | `routes/agent_registry.py` | Reset an agent to the default model |
+| `POST /agents-settings/{name}/model` | `routes/agent_registry.py` | Assign any model to any agent by name |
+| `GET  /agents-settings/models` | `routes/agent_registry.py` | View all agent → model assignments + default |
+| `DELETE /agents-settings/{name}/model` | `routes/agent_registry.py` | Reset an agent to the default model |
 
 ## Agent name
 

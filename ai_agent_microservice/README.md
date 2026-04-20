@@ -306,7 +306,7 @@ Returns the full catalogue of models supported by the provider layer, grouped by
 ### Assign a model to any agent
 
 ```
-POST /agents/{agent_name}/model
+POST /agents-settings/{agent_name}/model
 Content-Type: application/json
 ```
 
@@ -332,7 +332,7 @@ Response:
 ### View all agent model assignments
 
 ```
-GET /agents/models
+GET /agents-settings/models
 ```
 
 Returns every agent that has been explicitly assigned a model, plus the default fallback from `.env`.
@@ -354,7 +354,7 @@ Agents not listed in `registry` automatically use `default_model`.
 ### Reset an agent to the default model
 
 ```
-DELETE /agents/{agent_name}/model
+DELETE /agents-settings/{agent_name}/model
 ```
 
 Removes the explicit assignment. The agent reverts to `default_model` from `.env`.
@@ -444,7 +444,7 @@ ai_agent_microservice/
 │       ├── main.py               # FastAPI app — mounts all routers
 │       ├── routes/
 │       │   ├── product_description_generator_api_route.py  # POST /agents/generate-description — raw PIM record ingestion
-│       │   └── agent_registry.py # GET /models/available · POST|GET|DELETE /agents/* — global registry API
+│       │   └── agent_registry.py # GET /models/available · POST|GET|DELETE /agents-settings/* — global registry API
 │       ├── workflows/
 │       │   └── description_workflow.py  # LangGraph StateGraph — orchestrates the LLM call
 │       ├── tools/
@@ -481,7 +481,7 @@ The only way any agent touches an LLM. It accepts a `model` name and delegates t
 Reads the model name prefix and returns the matching provider instance. Instances are cached in a module-level dict so each provider SDK is initialised only once per process. This is the factory pattern — callers ask for what they want by name, not by constructing it themselves.
 
 **`pim_core/llm/registry.py`**
-An in-memory map of `agent_name → model_name` backed by SQLite. When the operator calls `POST /agents/{name}/model`, the registry is updated and persisted. When the agent's workflow runs, it reads from the registry to find its current model. If no model has been set for an agent, it falls back to `settings.claude_model`. This is what makes model switching possible at runtime without restart.
+An in-memory map of `agent_name → model_name` backed by SQLite. When the operator calls `POST /agents-settings/{name}/model`, the registry is updated and persisted. When the agent's workflow runs, it reads from the registry to find its current model. If no model has been set for an agent, it falls back to `settings.claude_model`. This is what makes model switching possible at runtime without restart.
 
 **`pim_core/llm/providers/base.py`**
 The abstract interface that all providers must satisfy. If a new provider is written (e.g. Mistral, Cohere), it must implement `complete()` with this exact signature. This enforces the contract so `LLMClient` can call any provider the same way.
@@ -575,7 +575,7 @@ Remove the hard dependency on Claude. Let operators switch any agent to OpenAI G
 
 - One agent has exactly one model assigned at a time
 - Multiple agents can share the same model
-- The model assignment is changed via `POST /agents/{agent_name}/model`
+- The model assignment is changed via `POST /agents-settings/{agent_name}/model`
 - Switching takes effect on the next generate call, no restart required
 - The service must start even if OpenAI or Google packages are not installed
 
@@ -625,9 +625,9 @@ The client now delegates to the factory instead of constructing an `AsyncAnthrop
 
 Four endpoints covering the full lifecycle:
 - `GET /models/available` — returns all supported models from the `AllAvailableModels*` enums
-- `POST /agents/{name}/model` — validates the model exists in an enum, then writes to registry + SQLite
-- `GET /agents/models` — returns all current assignments and the default fallback
-- `DELETE /agents/{name}/model` — removes an assignment, reverting that agent to the default
+- `POST /agents-settings/{name}/model` — validates the model exists in an enum, then writes to registry + SQLite
+- `GET /agents-settings/models` — returns all current assignments and the default fallback
+- `DELETE /agents-settings/{name}/model` — removes an assignment, reverting that agent to the default
 
 **Tests written in Phase 2 (10 new tests, 48 total):**
 - `test_llm_factory.py` — 5 tests: Anthropic routing, OpenAI routing, Google routing, instance caching, unknown prefix error
@@ -645,8 +645,8 @@ Four endpoints covering the full lifecycle:
                 ┌───────────────┴───────────────┐
                 │                               │
                 ▼                               ▼
-  POST /generate-description          POST /agents/{name}/model
-  POST /agents/generate-description      GET  /agents/models
+  POST /agents/generate-description   POST /agents-settings/{name}/model
+                                      GET  /agents-settings/models
   GET  /health                        GET  /models/available
                 │                               │
                 │        agents/product_description_generator/main.py │
@@ -987,7 +987,7 @@ Everything inside `agents/product_description_generator/` is exclusively owned b
 |---|---|
 | `agents/product_description_generator/main.py` | This agent's own FastAPI application and HTTP server |
 | `agents/product_description_generator/routes/product_description_generator_api_route.py` | `POST /agents/generate-description` — accepts a raw PIM record, runs the shared adapter, then calls the same generation pipeline |
-| `agents/product_description_generator/routes/agent_registry.py` | `GET /models/available` · `POST/GET/DELETE /agents/*` — global model assignment and registry view |
+| `agents/product_description_generator/routes/agent_registry.py` | `GET /models/available` · `POST/GET/DELETE /agents-settings/*` — global model assignment and registry view |
 | `agents/product_description_generator/tools/generate_description.py` | The `generate_description` FastMCP tool — content-specific logic |
 | `agents/product_description_generator/workflows/description_workflow.py` | LangGraph `StateGraph` wired for product description generation |
 | `agents/product_description_generator/prompts/brand_voice.py` | Prompt builders using `BrandVoice` — specific to product copywriting |
@@ -1024,7 +1024,7 @@ agents/
 │   ├── main.py
 │   ├── routes/
 │   │   ├── product_description_generator_api_route.py  POST /agents/generate-description
-│   │   └── agent_registry.py          GET /models/available · POST|GET|DELETE /agents/*
+│   │   └── agent_registry.py          GET /models/available · POST|GET|DELETE /agents-settings/*
 │   ├── tools/generate_description.py
 │   ├── workflows/description_workflow.py
 │   └── prompts/brand_voice.py
@@ -1044,6 +1044,6 @@ When building `agents/catalog/` or `agents/procurement/`:
 3. Create `agents/<name>/workflows/`, `tools/`, `prompts/` — agent-specific logic only
 4. Use `AllAgents.<NAME>.value` everywhere as the registry key — never a bare string
 5. Import `llm_client`, `agent_model_registry`, `get_provider`, and all schemas from `pim_core/` — never from `agents/product_description_generator/`
-6. Assign a model via `POST /agents/<name>/model` — no per-agent config route needed
+6. Assign a model via `POST /agents-settings/<name>/model` — no per-agent config route needed
 5. Add new shared schemas to `pim_core/schemas/` if multiple agents will need them
 6. Update this section of the README
