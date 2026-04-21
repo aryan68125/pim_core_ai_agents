@@ -81,6 +81,9 @@ graphify-out/
 # Superpowers plans & docs
 docs/
 
+# Project task lists
+project_task_list/product_description_generator/pim_ai_task_list.xlsx
+
 # LibreOffice lock files
 .~lock.*
 

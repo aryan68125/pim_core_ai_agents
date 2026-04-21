@@ -64,6 +64,37 @@ async def test_workflow_returns_seo_keywords(sample_product, sample_brand_voice)
 
 
 @pytest.mark.asyncio
+async def test_workflow_handles_json_wrapped_in_code_fences(sample_product, sample_brand_voice):
+    """Workflow correctly parses JSON even when Claude wraps it in markdown code fences."""
+    inner = json.dumps({
+        "title": "Fenced Title",
+        "description": "Fenced description.",
+        "seo_keywords": ["a", "b"],
+    })
+    fenced_response = f"```json\n{inner}\n```"
+
+    with patch(
+        "agents.product_description_generator.workflows.description_workflow.llm_client.complete",
+        new_callable=AsyncMock,
+    ) as mock_llm:
+        mock_llm.return_value = fenced_response
+
+        from agents.product_description_generator.workflows.description_workflow import description_graph
+        result = await description_graph.ainvoke({
+            "product": sample_product,
+            "channel": "ecommerce",
+            "brand_voice": sample_brand_voice,
+            "title": "",
+            "description": "",
+            "seo_keywords": [],
+            "error": None,
+        })
+
+    assert result["title"] == "Fenced Title"
+    assert result["error"] is None
+
+
+@pytest.mark.asyncio
 async def test_workflow_sets_error_on_invalid_json(sample_product, sample_brand_voice):
     """Workflow sets error key when LLM returns unparseable text."""
     with patch(

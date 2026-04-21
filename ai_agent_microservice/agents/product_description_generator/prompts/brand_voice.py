@@ -25,7 +25,8 @@ Rules:
 - Description: maximum {brand_voice.max_description_length} characters
 - Locale: {brand_voice.locale}{keyword_line}{avoid_line}
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON in this exact format.
+Do not wrap it in code fences. Do not add any text before or after the JSON.
 {{
   "title": "<product title>",
   "description": "<product description>",

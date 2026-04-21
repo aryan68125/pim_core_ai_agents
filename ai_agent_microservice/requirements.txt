@@ -4,6 +4,7 @@ anaconda-auth @ file:///croot/anaconda-cloud-auth-split_1747863777058/work
 anaconda-cli-base @ file:///croot/anaconda-cli-base_1741369443553/work
 annotated-doc==0.0.4
 annotated-types @ file:///work/perseverance-python-buildout/croot/annotated-types_1728386958747/work
+anthropic==0.96.0
 anyio==4.13.0
 archspec @ file:///croot/archspec_1709217642129/work
 attrs==26.1.0
@@ -37,10 +38,20 @@ fastapi==0.136.0
 fastmcp==3.2.4
 frozendict @ file:///work/perseverance-python-buildout/croot/frozendict_1728497542215/work
 git-filter-repo==2.47.0
+google-ai-generativelanguage==0.6.15
+google-api-core==2.30.3
+google-api-python-client==2.194.0
+google-auth==2.49.2
+google-auth-httplib2==0.3.1
+google-generativeai==0.8.6
+googleapis-common-protos==1.74.0
 graphifyy==0.4.14
 griffelib==2.0.2
+grpcio==1.80.0
+grpcio-status==1.71.2
 h11==0.16.0
 httpcore==1.0.9
+httplib2==0.31.2
 httpx==0.28.1
 httpx-sse==0.4.3
 idna @ file:///work/perseverance-python-buildout/croot/idna_1728385935861/work
@@ -85,7 +96,11 @@ pathable==0.5.0
 pkce @ file:///work/perseverance-python-buildout/croot/pkce_1728388093137/work
 platformdirs @ file:///croot/platformdirs_1744273042065/work
 pluggy @ file:///croot/pluggy_1733169602837/work
+proto-plus==1.27.2
+protobuf==5.29.6
 py-key-value-aio==0.4.4
+pyasn1==0.6.3
+pyasn1_modules==0.4.2
 pycosat @ file:///croot/pycosat_1736868416091/work
 pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
 pydantic @ file:///croot/pydantic_1750768261732/work
@@ -93,6 +108,7 @@ pydantic-settings @ file:///io/buildout/croot/pydantic-settings_1735843225507/wo
 pydantic_core @ file:///croot/pydantic-core_1750754736071/work
 Pygments @ file:///croot/pygments_1744664109463/work
 PyJWT @ file:///io/buildout/croot/pyjwt_1739558969999/work
+pyparsing==3.3.2
 pyperclip==1.11.0
 PyQt6==6.7.1
 PyQt6-Qt6==6.7.3
@@ -148,6 +164,7 @@ typer @ file:///work/perseverance-python-buildout/croot/typer_1728397851651/work
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 uncalled-for==0.3.1
+uritemplate==4.2.0
 urllib3 @ file:///croot/urllib3_1750775463400/work
 uuid_utils==0.14.1
 uvicorn==0.44.0

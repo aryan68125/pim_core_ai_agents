@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from agents.product_description_generator.workflows.description_workflow import description_graph
-from pim_core.config import settings
+from pim_core.llm.registry import agent_model_registry
 from pim_core.schemas.product import BrandVoice, DescriptionResult, Product
+from pim_core.utils.all_agents import AllAgents
 
 mcp = FastMCP("Content Agent")
 
@@ -53,5 +54,5 @@ async def generate_description(
         description=result_state["description"],
         seo_keywords=result_state["seo_keywords"],
         word_count=len(result_state["description"].split()),
-        model_used=settings.claude_model,
+        model_used=agent_model_registry.get(AllAgents.PRODUCT_DESCRIPTION_GENERATOR.value),
     )
