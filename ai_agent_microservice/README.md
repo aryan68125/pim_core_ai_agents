@@ -21,6 +21,7 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 13. [Shared vs Agent-Specific Code](#13-shared-vs-agent-specific-code)
 14. [Deep Dive — LangGraph, FastMCP, and How Everything Works Together](#14-deep-dive--langgraph-fastmcp-and-how-everything-works-together)
 15. [Deep Dive — The LLM Provider Layer (base, providers, client, factory, registry)](#15-deep-dive--the-llm-provider-layer-pim_corellm)
+16. [Deep Dive — Prompts, Routes, Tools, and Workflows](#16-deep-dive--prompts-routes-tools-and-workflows)
 
 ---
 
@@ -1499,6 +1500,783 @@ Each layer can change independently without touching the others. A prompt engine
 | **Adapter Pattern** | `pim_record_to_product()` translates one data format into another |
 | **Lazy import** | OpenAI and Google SDKs are only imported when first needed, not at startup |
 | **Registry** | `AgentModelRegistry` — the runtime map of which LLM each agent uses, backed by SQLite |
+
+---
+
+## 16. Deep Dive — Prompts, Routes, Tools, and Workflows
+
+> This section covers the five files that make up the Product Description Generator agent: `brand_voice.py`, `agent_registry.py`, `product_description_generator_api_route.py`, `generate_description.py`, and `description_workflow.py`.
+
+---
+
+### Q1 — `prompts/brand_voice.py`
+
+**File:** [agents/product_description_generator/prompts/brand_voice.py](agents/product_description_generator/prompts/brand_voice.py)
+
+There are two pure functions here. Neither calls the LLM. Neither has side effects. They take data in and return strings out — the strings sent to the LLM as the system prompt and user message.
+
+---
+
+#### `get_system_prompt(brand_voice: BrandVoice) -> str`
+
+**Purpose:** Build the LLM *system prompt* — the invisible instruction layer that sets the model's role, rules, and output format before any conversation begins.
+
+Think of the system prompt like a job briefing given to an employee before they start work. It tells them who they are, what they must produce, the rules they must follow, and the exact format expected.
+
+**How it builds the string:**
+
+```python
+def get_system_prompt(brand_voice: BrandVoice) -> str:
+    # Step 1: optional keyword instruction — only added if list is non-empty
+    keyword_line = ""
+    if brand_voice.keywords:
+        keyword_line = (
+            f"\n- Include these SEO keywords naturally: {', '.join(brand_voice.keywords)}"
+        )
+    # e.g. "\n- Include these SEO keywords naturally: M4 Max, workstation"
+
+    # Step 2: optional word-avoidance — only added if list is non-empty
+    avoid_line = ""
+    if brand_voice.avoid_words:
+        avoid_line = f"\n- Avoid these words: {', '.join(brand_voice.avoid_words)}"
+    # e.g. "\n- Avoid these words: cheap, budget"
+
+    # Step 3: f-string assembles everything
+    return f"""You are a professional product copywriter specialising in e-commerce content.
+...
+Rules:
+- Tone: {brand_voice.tone}
+- Title: maximum {brand_voice.max_title_length} characters
+- Description: maximum {brand_voice.max_description_length} characters
+- Locale: {brand_voice.locale}{keyword_line}{avoid_line}
+
+Respond ONLY with valid JSON in this exact format.
+Do not wrap it in code fences. Do not add any text before or after the JSON.
+{{
+  "title": "<product title>",
+  "description": "<product description>",
+  "seo_keywords": ["keyword1", "keyword2", "keyword3"]
+}}"""
+```
+
+**Why are `keyword_line` and `avoid_line` conditional?**
+
+If `brand_voice.keywords` is `[]` and you formatted the line unconditionally, you would send:
+```
+- Include these SEO keywords naturally: 
+```
+An empty instruction. The LLM would either ignore it or produce unpredictable output. Conditional assembly means the line only appears when it has content.
+
+**What a real rendered system prompt looks like:**
+
+```
+You are a professional product copywriter specialising in e-commerce content.
+
+Your task is to generate an SEO-optimised product title and description.
+
+Rules:
+- Tone: professional
+- Title: maximum 80 characters
+- Description: maximum 500 characters
+- Locale: en-GB
+- Include these SEO keywords naturally: Mac Studio, M4 Max, workstation
+- Avoid these words: cheap
+
+Respond ONLY with valid JSON in this exact format.
+Do not wrap it in code fences. Do not add any text before or after the JSON.
+{
+  "title": "<product title>",
+  "description": "<product description>",
+  "seo_keywords": ["keyword1", "keyword2", "keyword3"]
+}
+```
+
+**Why instruct the LLM to return only JSON?**
+
+Because `generate_node` parses the response with `json.loads()`. Any conversational text before or after the JSON — "Sure! Here is the description:" — breaks parsing. The `_FENCE_RE` regex in `description_workflow.py` handles the remaining cases where the LLM wraps the JSON in code fences despite this instruction.
+
+---
+
+#### `get_user_message(product: Product, channel: str) -> str`
+
+**Purpose:** Build the *user turn* message — the actual product data the LLM reads and writes copy for. If the system prompt is the job briefing, the user message is the specific task: "write copy for *this* product".
+
+**How it builds the string:**
+
+```python
+def get_user_message(product: Product, channel: str) -> str:
+    attr_lines: list[str] = []
+
+    # Step 1: add known structured attributes, only if non-empty
+    if product.attributes.brand:
+        attr_lines.append(f"Brand: {product.attributes.brand}")
+    if product.attributes.color:
+        attr_lines.append(f"Colour: {product.attributes.color}")
+    # ... size, material, weight, dimensions ...
+
+    # Step 2: add everything from the 'additional' dict
+    # warranty, vendor_part_number, web_category, product_type etc. all land here
+    for key, value in product.attributes.additional.items():
+        attr_lines.append(f"{key}: {value}")
+
+    # Step 3: join into a block or use fallback
+    attr_block = "\n".join(attr_lines) if attr_lines else "No additional attributes"
+
+    # Step 4: assemble into the final message
+    return f"""Product to describe:
+Name: {product.name}
+Category: {product.category}
+Channel: {channel}
+
+Attributes:
+{attr_block}
+
+Existing description (for context, do not copy verbatim):
+{product.existing_description or 'None'}"""
+```
+
+**What a real rendered user message looks like:**
+
+```
+Product to describe:
+Name: MACSTUDIO E25 M4M/64/1TB
+Category: APPLE DESKTOP SYSTEMS
+Channel: ecommerce
+
+Attributes:
+Brand: APPLE
+warranty: 1 year
+vendor_part_number: 15098309
+web_manufacturer: Apple Inc
+web_category: Computers<br />Desktop Computers
+product_type: Hardware
+
+Existing description (for context, do not copy verbatim):
+Apple Mac Studio with M4 Max chip, 64GB RAM, 1TB SSD.
+```
+
+**Why iterate `product.attributes.additional`?**
+
+The `additional` dict holds all extra PIM fields that don't have a dedicated attribute on `ProductAttributes` — `warranty`, `vendor_part_number`, `web_manufacturer`, `web_category`, `product_type`, `category_attributes`. All of them are valuable context for generating accurate copy.
+
+**Why "for context, do not copy verbatim"?**
+
+The existing description from the PIM system seeds the LLM with context about the product without forcing it to plagiarise a potentially poor or truncated description. "Do not copy verbatim" prevents the LLM from lazily returning the same text.
+
+---
+
+### Q2 — `routes/agent_registry.py` — How do `get_all_agent_models` and `reset_agent_model` work with the registry?
+
+**File:** [agents/product_description_generator/routes/agent_registry.py](agents/product_description_generator/routes/agent_registry.py)
+
+---
+
+#### `GET /agents-settings/models` — `get_all_agent_models`
+
+```python
+@router.get("/agents-settings/models", response_model=AllAgentModelsResponse)
+async def get_all_agent_models() -> AllAgentModelsResponse:
+    return AllAgentModelsResponse(
+        registry=agent_model_registry.all(),
+        default_model=settings.claude_model,
+    )
+```
+
+This looks like just two lines — no database query, no external call. That is because the data was already loaded into RAM at server startup. Here is the full lifecycle:
+
+```
+Server process starts
+       │
+       │  Python imports registry.py for the first time
+       │
+       ▼
+AgentModelRegistry.__init__() runs  (once per process lifetime)
+       │
+       ├── agent_model_db.load_all()
+       │        │
+       │        │  SQLite: SELECT agent_name, model_name FROM agent_models
+       │        │
+       │        ▼
+       │   {"product_description_generator": "gpt-4o",
+       │    "catalog": "gemini-2.0-flash"}
+       │
+       └── self._registry = {"product_description_generator": "gpt-4o",
+                              "catalog": "gemini-2.0-flash"}
+                              ← lives in RAM for the entire process lifetime
+                              ← no further SQLite reads on the hot path
+
+
+GET /agents-settings/models arrives
+       │
+       ▼
+get_all_agent_models()
+       │
+       ├── agent_model_registry.all()
+       │        │
+       │        └── return dict(self._registry)   ← snapshot copy, not a reference
+       │             {"product_description_generator": "gpt-4o",
+       │              "catalog": "gemini-2.0-flash"}
+       │
+       ├── settings.claude_model  →  "claude-sonnet-4-6"  (from .env)
+       │
+       └── AllAgentModelsResponse(
+               registry={"product_description_generator": "gpt-4o",
+                         "catalog": "gemini-2.0-flash"},
+               default_model="claude-sonnet-4-6"
+           )
+       │
+       ▼
+HTTP 200:
+{
+  "registry": {
+    "product_description_generator": "gpt-4o",
+    "catalog": "gemini-2.0-flash"
+  },
+  "default_model": "claude-sonnet-4-6"
+}
+```
+
+**Why is `procurement` not in the registry?**
+
+Because no one called `POST /agents-settings/procurement/model`. The registry only holds agents that were explicitly assigned a model. Every other agent falls back to `default_model` when `registry.get()` is called.
+
+**Why does `all()` return `dict(self._registry)` instead of `self._registry` directly?**
+
+Returning `self._registry` would give the caller a reference to the live internal dict. The caller could accidentally mutate it. Returning `dict(...)` gives a shallow copy — a snapshot of the current state that the caller cannot accidentally corrupt.
+
+---
+
+#### `DELETE /agents-settings/{agent_name}/model` — `reset_agent_model`
+
+```python
+@router.delete("/agents-settings/{agent_name}/model", response_model=AgentModelResponse)
+async def reset_agent_model(agent_name: str) -> AgentModelResponse:
+    agent_model_registry.remove(agent_name)
+    return AgentModelResponse(agent=agent_name, model=settings.claude_model)
+```
+
+`agent_model_registry.remove(agent_name)` does two things:
+
+```python
+def remove(self, agent_name: str) -> None:
+    self._registry.pop(agent_name, None)    # 1. remove from in-memory dict
+    agent_model_db.delete(agent_name)       # 2. remove from SQLite
+```
+
+```
+State BEFORE reset:
+  self._registry = {"product_description_generator": "gpt-4o"}
+  SQLite:
+    ┌──────────────────────────────────┬───────────┐
+    │ agent_name                       │ model_name│
+    ├──────────────────────────────────┼───────────┤
+    │ product_description_generator    │ gpt-4o    │
+    └──────────────────────────────────┴───────────┘
+
+
+DELETE /agents-settings/product_description_generator/model
+       │
+       ▼
+agent_model_registry.remove("product_description_generator")
+       │
+       ├── self._registry.pop("product_description_generator", None)
+       │   Before: {"product_description_generator": "gpt-4o"}
+       │   After:  {}
+       │   (second argument None = silently do nothing if key not found)
+       │
+       └── agent_model_db.delete("product_description_generator")
+               │
+               ▼
+           DELETE FROM agent_models
+           WHERE agent_name = 'product_description_generator'
+               │
+               ▼
+           SQLite table now empty for that agent
+
+
+State AFTER reset:
+  self._registry = {}
+  SQLite: row deleted — survives server restart
+
+
+HTTP 200:
+{ "agent": "product_description_generator", "model": "claude-sonnet-4-6" }
+                                                       ↑ settings.claude_model
+
+
+Next LLM call after reset:
+       │
+       ▼
+agent_model_registry.get("product_description_generator")
+       │
+       ├── "product_description_generator" in self._registry?   NO
+       │
+       └── return settings.claude_model  →  "claude-sonnet-4-6"
+```
+
+**What happens if you reset an agent that was never assigned?**
+
+`self._registry.pop(agent_name, None)` — the `, None` default silently does nothing if the key is absent. `agent_model_db.delete(agent_name)` runs a `DELETE WHERE` that matches zero rows — also harmless. The response still returns 200.
+
+---
+
+### Q3 — `tools/generate_description.py`
+
+**File:** [agents/product_description_generator/tools/generate_description.py](agents/product_description_generator/tools/generate_description.py)
+
+---
+
+#### What is `FastMCP("Content Agent")`?
+
+**MCP (Model Context Protocol)** is an open standard created by Anthropic. It defines a universal protocol for connecting LLMs to external tools — similar to how USB is a standard for connecting devices to computers. Any LLM that speaks MCP can use any tool that exposes MCP, without custom integration code for each pair.
+
+**FastMCP** is a Python library that makes building MCP servers easy. Instead of writing protocol boilerplate, you decorate your function.
+
+```python
+mcp = FastMCP("Content Agent")
+```
+
+This creates a named MCP server. `"Content Agent"` is the server's identity — how an MCP client (such as a Claude agent or an MCP inspector) will refer to this server and the tools it provides.
+
+The `mcp` object does not affect how the FastAPI route calls `generate_description`. The route calls it as a plain Python function. The decorator's value is forward-looking: if you later want a Claude agent to discover and call this tool via the MCP protocol directly (without HTTP), the server is already built — you just expose the transport.
+
+---
+
+#### What is `@mcp.tool()` and why is it here?
+
+```python
+@mcp.tool()
+async def generate_description(
+    product: Product,
+    channel: str,
+    brand_voice: BrandVoice | None = None,
+) -> DescriptionResult:
+    ...
+```
+
+`@mcp.tool()` registers the function with the MCP server. FastMCP reads:
+
+| What FastMCP reads | What it becomes |
+|---|---|
+| Function name `generate_description` | Tool name — used by a Claude agent to call it |
+| Docstring | Tool description — what an agent reads to decide when to use this tool |
+| Type hints (`product: Product`, etc.) | JSON Schema — parameter definitions |
+| Return type `-> DescriptionResult` | Output schema |
+
+**Why use `@mcp.tool()` instead of a plain function?**
+
+1. **Future compatibility** — if you want a Claude agent to call this tool via MCP transport instead of HTTP, no code changes are needed
+2. **Self-documentation** — the tool schema is machine-readable; any MCP client can call `list_tools()` and discover `generate_description` automatically
+3. **Separation of concerns** — the tool is the "what" (generate a description); the HTTP route is the "how the request arrived"; they stay independent
+
+---
+
+#### Full walkthrough of `generate_description`
+
+**Step 1 — Apply default brand voice**
+
+```python
+if brand_voice is None:
+    brand_voice = BrandVoice()
+```
+
+`BrandVoice()` with no arguments applies all defaults: tone=`"professional"`, locale=`"en-GB"`, max lengths, empty keywords and avoid lists. Callers don't have to send `brand_voice` at all.
+
+**Step 2 — Initialise the LangGraph state**
+
+```python
+state = {
+    "product":      product,
+    "channel":      channel,
+    "brand_voice":  brand_voice,
+    "title":        "",       # generate_node will fill this
+    "description":  "",       # generate_node will fill this
+    "seo_keywords": [],       # generate_node will fill this
+    "error":        None,     # generate_node sets this on parse failure
+}
+```
+
+All fields must exist at initialisation — including the empty output fields — because LangGraph validates the state shape when `ainvoke()` is called.
+
+**Step 3 — Run the LangGraph**
+
+```python
+result_state = await description_graph.ainvoke(state)
+```
+
+`await` suspends this coroutine and returns control to the FastAPI event loop while the LLM call happens. The graph runs `generate_node`, which calls the LLM, parses the JSON response, fills the output fields (or sets `error`), and returns the final state dict.
+
+**Step 4 — Check for errors**
+
+```python
+if result_state.get("error"):
+    raise ValueError(result_state["error"])
+```
+
+`generate_node` never raises exceptions — it catches all errors internally and stores them in `state["error"]`. This line surfaces the error as a Python exception. The route handler catches it and returns HTTP 422.
+
+**Step 5 — Assemble and return `DescriptionResult`**
+
+```python
+return DescriptionResult(
+    product_id=product.id,
+    channel=channel,
+    title=result_state["title"],
+    description=result_state["description"],
+    seo_keywords=result_state["seo_keywords"],
+    word_count=len(result_state["description"].split()),   # computed in code, not by LLM
+    model_used=agent_model_registry.get(AllAgents.PRODUCT_DESCRIPTION_GENERATOR.value),
+)
+```
+
+**Why compute `word_count` in Python instead of asking the LLM?**
+
+Asking an LLM to count its own words accurately is unreliable. A simple `len(text.split())` is exact, deterministic, and free. Always compute objective metrics in code.
+
+**Why read `model_used` from the registry at the end?**
+
+The registry is the single source of truth. Reading it here guarantees `model_used` reflects the model that was actually called during this invocation, even if the model was changed by another concurrent request.
+
+---
+
+### Q4 — `workflows/description_workflow.py`
+
+**File:** [agents/product_description_generator/workflows/description_workflow.py](agents/product_description_generator/workflows/description_workflow.py)
+
+---
+
+#### `_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)`
+
+This is a precompiled **regular expression** that detects and extracts JSON wrapped in markdown code fences.
+
+**Why it exists:**
+
+The system prompt instructs the LLM: *"Respond ONLY with valid JSON. Do not wrap it in code fences."* LLMs are probabilistic — they don't always follow instructions. Claude sometimes returns:
+
+````
+```json
+{
+  "title": "Apple Mac Studio M4 Max",
+  "description": "Experience unparalleled performance...",
+  "seo_keywords": ["mac studio", "m4 max"]
+}
+```
+````
+
+Calling `json.loads()` on that string fails because of the backtick wrapper. `_FENCE_RE` strips them as a safety net.
+
+**Anatomy of the pattern:**
+
+```
+r"```(?:json)?\s*(\{.*?\})\s*```"
+    ^^^                      ^^^
+     │   ^^^^^^^^ ^^^^^^^^    │
+     │       │        │       └── closing triple backtick
+     │       │        └── capture group: the JSON object {…}
+     │       └── optional "json" language tag + whitespace
+     └── opening triple backtick
+```
+
+| Part | What it matches |
+|---|---|
+| ` ``` ` | Opening code fence |
+| `(?:json)?` | Optional `json` language tag — `(?:...)` is non-capturing so it is not included in `.group(1)` |
+| `\s*` | Zero or more whitespace characters including newlines |
+| `(\{.*?\})` | Capture group — a JSON object from `{` to `}`. `.*?` is *non-greedy*: stops at the first `}` rather than the last |
+| `\s*` | Trailing whitespace |
+| ` ``` ` | Closing code fence |
+| `re.DOTALL` | Makes `.` match newlines — required because JSON spans multiple lines |
+
+**How `_extract_json` uses it:**
+
+```python
+def _extract_json(raw: str) -> str:
+    stripped = raw.strip()
+    match = _FENCE_RE.search(stripped)
+    if match:
+        return match.group(1).strip()   # JSON from inside the fences
+    return stripped                     # no fences — plain JSON, return as-is
+```
+
+Two cases handled cleanly:
+1. LLM returns plain JSON → no match → return as-is
+2. LLM returns fenced JSON → match → return just the object inside
+
+**Why precompile with `re.compile()`?**
+
+`re.compile()` parses the regex pattern once at module import time. If you used `re.search(pattern, text)` inside the function, Python would re-parse the pattern on every call. Since `_extract_json` runs on every LLM response, precompiling avoids this repeated work.
+
+---
+
+#### `generate_node(state: DescriptionState) -> dict`
+
+This is the single node in the LangGraph. It receives the full current state, does the LLM call, and returns a dict of only the fields it changes.
+
+```python
+async def generate_node(state: DescriptionState) -> dict:
+    # Step 1: which model is this agent currently using?
+    model = agent_model_registry.get(AllAgents.PRODUCT_DESCRIPTION_GENERATOR.value)
+
+    # Step 2: build prompts from state
+    system_prompt = get_system_prompt(state["brand_voice"])
+    user_message  = get_user_message(state["product"], state["channel"])
+
+    # Step 3: log what we are about to do
+    logger.info("Calling LLM model '%s' for product %s on channel %s",
+                model, state["product"].id, state["channel"])
+
+    try:
+        # Step 4: call the LLM (async — non-blocking)
+        raw_text = await llm_client.complete(
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+            model=model,
+            max_tokens=1200,
+        )
+
+        # Step 5: strip code fences if present, then parse JSON
+        parsed = json.loads(_extract_json(raw_text))
+
+        # Step 6: return only the fields that changed
+        return {
+            "title":        parsed["title"],
+            "description":  parsed["description"],
+            "seo_keywords": parsed.get("seo_keywords", []),
+            "error":        None,
+        }
+
+    except (json.JSONDecodeError, KeyError) as exc:
+        # Step 7: store error in state — do NOT raise
+        logger.error("LLM parse failed for product %s: %s", state["product"].id, exc)
+        return {"error": f"Failed to parse LLM response: {exc}"}
+```
+
+**Why return only changed fields?**
+
+LangGraph merges the returned dict into the existing state. Returning `{"title": "...", "description": "..."}` updates only those two fields; `product`, `channel`, `brand_voice` remain unchanged without you having to explicitly pass them through. You never need to copy unchanged state fields.
+
+**Why catch `KeyError`?**
+
+If the LLM returns valid JSON but without the expected keys:
+```json
+{"heading": "Apple Mac Studio", "body": "..."}
+```
+`parsed["title"]` raises `KeyError`. Catching it alongside `JSONDecodeError` means the caller gets a clean error message rather than an unhandled exception.
+
+**Why never raise inside a node?**
+
+Raising an exception inside a LangGraph node causes `ainvoke()` to propagate it all the way to the caller as an unhandled exception, which FastAPI turns into an HTTP 500. By catching all expected errors and storing them in `state["error"]`, the graph always reaches `END` cleanly. The caller (the tool) checks `state["error"]` and decides how to surface the error as an HTTP response.
+
+---
+
+#### `build_description_graph()` — Why wrap construction in a function?
+
+```python
+def build_description_graph():
+    graph: StateGraph = StateGraph(DescriptionState)
+    graph.add_node("generate", generate_node)
+    graph.set_entry_point("generate")
+    graph.add_edge("generate", END)
+    return graph.compile()
+```
+
+The graph construction is a function — not bare module-level statements — for **testability**. Any test can call `build_description_graph()` to get a fresh, independent graph instance. If the graph were built directly at module level as bare statements, there would be no way to get a clean graph in tests.
+
+**What `graph.compile()` does:**
+
+Compilation converts the mutable `StateGraph` builder into a locked, runnable `CompiledGraph`. During compilation LangGraph:
+- Validates every node referenced in edges exists
+- Validates the entry point is a registered node
+- Builds internal routing tables
+- Returns an object with `invoke()`, `ainvoke()`, `astream()` etc.
+
+After `compile()` the graph structure is frozen. Only the data (the state dict) changes at runtime.
+
+---
+
+#### `description_graph = build_description_graph()`
+
+```python
+description_graph = build_description_graph()
+```
+
+This line runs **once** when Python first imports `description_workflow`. The compiled graph is stored as a module-level singleton.
+
+**Where is `description_graph` used?**
+
+Imported and used in exactly one place:
+
+```python
+# tools/generate_description.py — line 5
+from agents.product_description_generator.workflows.description_workflow import description_graph
+
+# ...line 45:
+result_state = await description_graph.ainvoke(state)
+```
+
+The compiled graph is safe to call concurrently — each `ainvoke()` call operates on its own copy of the state, so multiple simultaneous HTTP requests do not interfere with each other.
+
+---
+
+### Q5 — How all five files work together: the complete flow
+
+```
+  HTTP Client
+      │
+      │  POST /agents/generate-description
+      │  { "pim_record": { "productID": 705517, ... },
+      │    "channel": "ecommerce",
+      │    "brand_voice": { "tone": "professional", "keywords": ["M4 Max"] } }
+      │
+      ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  product_description_generator_api_route.py                              │
+│                                                                          │
+│  FastAPI validates body against GenerateFromPIMRequest (Pydantic)        │
+│  Invalid → 422 automatically                                             │
+│                                                                          │
+│  pim_record_to_product(request.pim_record)   ← pim_adapter.py           │
+│  → Product(id="705517", name="MACSTUDIO ...", category="APPLE DESKTOP    │
+│            SYSTEMS", attributes=ProductAttributes(brand="APPLE", ...))   │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │ generate_description(product, channel, brand_voice)
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  tools/generate_description.py   (@mcp.tool)                             │
+│                                                                          │
+│  brand_voice = brand_voice or BrandVoice()   ← apply defaults           │
+│                                                                          │
+│  state = { "product": Product(...), "channel": "ecommerce",              │
+│            "brand_voice": BrandVoice(...),                               │
+│            "title": "", "description": "", "seo_keywords": [],           │
+│            "error": None }                                               │
+│                                                                          │
+│  await description_graph.ainvoke(state)   ───────────────────────────►  │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  description_workflow.py   (LangGraph StateGraph)                        │
+│                                                                          │
+│  ┌─────────┐                                                             │
+│  │  START  │                                                             │
+│  └────┬────┘                                                             │
+│       │ entry point                                                      │
+│       ▼                                                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  generate_node(state)                                             │   │
+│  │                                                                   │   │
+│  │  A. registry.get("product_description_generator") → "gpt-4o"     │   │
+│  │        └── pim_core/llm/registry.py                               │   │
+│  │                                                                   │   │
+│  │  B. get_system_prompt(brand_voice) ← prompts/brand_voice.py      │   │
+│  │     → "You are a professional product copywriter..."              │   │
+│  │                                                                   │   │
+│  │  C. get_user_message(product, "ecommerce") ← brand_voice.py      │   │
+│  │     → "Product to describe:\nName: MACSTUDIO..."                  │   │
+│  │                                                                   │   │
+│  │  D. llm_client.complete(model="gpt-4o", system=..., messages=[..]│   │
+│  │        └── pim_core/llm/client.py                                 │   │
+│  │              └── factory.get_provider("gpt-4o")                   │   │
+│  │                    └── OpenAIProvider.complete(...)                │   │
+│  │                          └── OpenAI API HTTP call (awaited)        │   │
+│  │                                                                   │   │
+│  │  E. _extract_json(raw_text) — strip code fences if present        │   │
+│  │     json.loads(cleaned)                                            │   │
+│  │     → {"title": "...", "description": "...", "seo_keywords": [...]}│   │
+│  │                                                                   │   │
+│  │  returns { "title": "Apple Mac Studio M4 Max — 64GB RAM, 1TB SSD",│   │
+│  │            "description": "Experience unparalleled performance...",│   │
+│  │            "seo_keywords": ["mac studio", "m4 max", "workstation"],│   │
+│  │            "error": None }                                         │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│       │ edge: "generate" → END                                           │
+│       ▼                                                                  │
+│  ┌─────────┐                                                             │
+│  │   END   │                                                             │
+│  └─────────┘                                                             │
+│                                                                          │
+│  ainvoke() returns final state dict                                      │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  tools/generate_description.py  (back in generate_description)           │
+│                                                                          │
+│  result_state["error"] is None  → continue                              │
+│                                                                          │
+│  return DescriptionResult(                                               │
+│    product_id  = "705517",                                               │
+│    channel     = "ecommerce",                                            │
+│    title       = "Apple Mac Studio M4 Max — 64GB RAM, 1TB SSD",         │
+│    description = "Experience unparalleled desktop performance...",       │
+│    seo_keywords= ["mac studio", "m4 max", "workstation"],                │
+│    word_count  = 6,                  ← computed by Python, not LLM      │
+│    model_used  = "gpt-4o"            ← read from registry               │
+│  )                                                                       │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │
+                                   ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  product_description_generator_api_route.py                              │
+│  FastAPI serialises DescriptionResult to JSON                            │
+└──────────────────────────────────┬───────────────────────────────────────┘
+                                   │
+                                   ▼
+HTTP 200:
+{
+  "product_id":    "705517",
+  "channel":       "ecommerce",
+  "title":         "Apple Mac Studio M4 Max — 64GB RAM, 1TB SSD",
+  "description":   "Experience unparalleled desktop performance...",
+  "seo_keywords":  ["mac studio", "m4 max", "workstation"],
+  "word_count":    6,
+  "model_used":    "gpt-4o"
+}
+```
+
+---
+
+### Responsibility map — which file owns what
+
+```
+What needs doing               Who does it
+─────────────────────────────────────────────────────────────────────────
+Receive HTTP request           product_description_generator_api_route.py
+Validate request body          FastAPI + Pydantic (automatic)
+Convert PIM fields → Product   pim_core/adapters/pim_adapter.py
+Build system prompt            prompts/brand_voice.py
+Build user message             prompts/brand_voice.py
+Orchestrate the workflow       workflows/description_workflow.py
+Decide which LLM to use        pim_core/llm/registry.py
+Call the LLM                   pim_core/llm/client.py + factory.py
+Strip code fences from LLM     _extract_json() in description_workflow.py
+Parse LLM JSON response        generate_node() in description_workflow.py
+Assemble final result          tools/generate_description.py
+Expose as MCP tool             tools/generate_description.py (@mcp.tool)
+Manage agent-to-model map      pim_core/llm/registry.py + agent_model_db
+List available models          routes/agent_registry.py
+Assign model to agent          routes/agent_registry.py
+Reset agent to default         routes/agent_registry.py
+```
+
+---
+
+### Error handling map — what breaks where and how it surfaces
+
+```
+Error location                  How caught                      HTTP status
+─────────────────────────────────────────────────────────────────────────────
+Invalid request body            FastAPI + Pydantic automatic    422
+PIM record cannot be adapted    try/except in api route         400
+LLM returns invalid JSON        try/except in generate_node     state["error"]
+  surfaced in tool              if result_state.get("error")    ValueError raised
+  caught in api route           except ValueError               422
+LLM API key missing             provider __init__ raises        500 (unhandled — ops issue)
+Unknown model requested         factory raises ValueError       400 (caught in set_agent_model)
+```
+
+> **Interview answer:** "Each layer catches only what it can meaningfully handle. The workflow node catches JSON parse errors because it owns the response format. The route handler catches adapter errors because it owns HTTP status codes. The factory catches unknown model names because it owns the model catalogue. No layer handles another layer's errors — that is the single-responsibility principle in practice."
 
 ---
 
