@@ -6,19 +6,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ClassifierSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # LLM
-    classifier_model: str = "claude-sonnet-4-6"
+    # LLM — swap model name to change provider (pim_core handles routing)
+    classifier_model: str = "gpt-4o"
+
+    # Embedding — swap provider/model without changing any other code
+    embedding_provider: str = "openai"
+    embedding_model: str = "text-embedding-3-small"
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/auto_classifier"
 
-    # Redis
-    redis_url: str = "redis://localhost:6379"
-    cache_ttl_seconds: int = 86400  # 24h
-
-    # Confidence thresholds
-    confidence_auto_accept: float = 0.95   # write immediately, no HITL
-    confidence_write: float = 0.75         # write but flag for sample review
+    # 3-path confidence thresholds (calibrated for product-description → category-path cross-domain embeddings)
+    high_confidence_threshold: float = 0.55   # Path A: top-5 direct to LLM
+    low_confidence_threshold: float = 0.45    # Path B: web+top-5; below = Path C
 
     log_level: str = "INFO"
 

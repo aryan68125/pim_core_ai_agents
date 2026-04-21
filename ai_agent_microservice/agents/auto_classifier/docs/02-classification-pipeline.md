@@ -1,150 +1,91 @@
-# Feature 02 — Classification Pipeline
+# 02 — Classification Pipeline
 
-The pipeline classifies a product description against a chosen taxonomy standard using a two-stage approach: fast embedding similarity first, LLM reasoning only when needed.
+The pipeline is a 6-node LangGraph `StateGraph` in `workflows/classification_workflow.py`. All state passes through a `ClassificationState` TypedDict.
 
 ---
 
-## Pipeline Overview
+## State Shape
 
-```
-Input: product_text + taxonomy_type + top_k
-         │
-         ▼
-  ┌─────────────┐
-  │ Redis Cache │──── HIT ──────────────────────────────► Return cached result
-  └──────┬──────┘
-         │ MISS
-         ▼
-  ┌──────────────────────────────────────────────┐
-  │  STAGE 1 — Embedding Similarity              │
-  │                                              │
-  │  Embed product_text with OpenAI              │
-  │  Run pgvector HNSW cosine search             │
-  │  Get top_k candidates with scores            │
-  └───────────────────┬──────────────────────────┘
-                      │
-             top score ≥ 0.92?
-            /                  \
-          YES                   NO
-           │                    │
-           │    ┌───────────────▼───────────────────────┐
-           │    │  STAGE 2 — LLM Tier 2                  │
-           │    │                                        │
-           │    │  Send candidates + product_text to LLM │
-           │    │  LLM picks best + returns confidence    │
-           │    └───────────────┬───────────────────────┘
-           │                    │
-           └──────────┬─────────┘
-                      │
-             confidence ≥ 0.75?
-            /                   \
-          YES                    NO
-           │                     │
-     auto-accept           flag for human review
-           │                     │
-           └──────────┬──────────┘
-                      │
-              Persist + Audit + Cache
-                      │
-                      ▼
-                   Response
+```python
+class ClassificationState(TypedDict):
+    product_text: str          # "{description} {manufacturer}"
+    session: AsyncSession      # DB session passed through graph
+    embedding: list[float] | None
+    candidates: list[dict]     # top 5 from pgvector search
+    top_score: float
+    web_context: str | None    # Wikipedia summary (Paths B/C)
+    path: str | None           # "A", "B", or "C"
+    category_path: str | None  # final answer
+    category_id: int | None
+    confidence: float
+    method: str                # "A", "B", or "C" — which path was used
+    error: str | None
 ```
 
 ---
 
-## Stage 1 — Embedding Similarity
+## Path A — High Confidence (score ≥ 0.55)
 
-**File:** `src/classifier/pipeline/embedding.py`
-
-The product text is embedded with `text-embedding-3-small` (1536 dimensions). The resulting vector is compared against all pre-embedded taxonomy nodes using pgvector's **cosine distance operator** (`<=>`).
-
-```sql
-SELECT id, code, name, breadcrumb,
-       1 - (embedding <=> $vec::vector) AS score
-FROM taxonomy_nodes
-WHERE taxonomy_type = $taxonomy_type
-ORDER BY embedding <=> $vec::vector
-LIMIT $top_k
+```
+embed → search → route → llm → END
 ```
 
-The HNSW index makes this query fast even across hundreds of thousands of nodes (typically < 10ms).
+1. Embed product text
+2. Find top 5 categories by cosine similarity
+3. `top_score ≥ 0.55` → route to Path A
+4. LLM picks best from the 5 candidates
+5. `category_id` resolved from candidate list by exact `category_path` match
 
-**Score** ranges from 0 (completely unrelated) to 1 (identical). A score of 0.92+ means the embedding alone is confident enough — the LLM is not called.
+**Prompt:** "You are a product classifier. Pick the single best category from the list."
 
 ---
 
-## Stage 2 — LLM Tier 2
+## Path B — Medium Confidence (0.45 ≤ score < 0.55)
 
-**File:** `src/classifier/pipeline/llm_classify.py`
+```
+embed → search → route → web_search → llm → END
+```
 
-Only runs when embedding confidence is below 0.92.
+1–3. Same as Path A
+4. Wikipedia searched for product context (up to 500 chars)
+5. LLM picks best using web context + 5 candidates
+6. `category_id` resolved same as Path A
 
-The LLM receives:
-- The product description
-- The top-k candidates from the embedding search, with their codes, names, breadcrumbs, and embedding scores
+**Prompt:** "Use the web context and the category list to pick the best match."
 
-It returns a structured JSON response:
+---
+
+## Path C — Low Confidence (score < 0.45)
+
+```
+embed → search → route → web_search → llm → save_category → END
+```
+
+1–4. Same as Path B (web context gathered)
+5. LLM generates a **new** `L1 > L2 > L3` category path freely (no candidate list)
+6. New category is embedded and saved to `web_categories` with a negative `category_id`
+
+**Prompt:** "Generate the most appropriate L1 > L2 > L3 category path."
+
+---
+
+## LLM Response Format
+
+All three paths expect the same JSON shape:
+
 ```json
 {
-  "code": "10000265",
-  "name": "Bolts/Hex Bolts (Fasteners)",
-  "confidence": 0.88,
-  "reasoning": "Hex bolt M6x20 maps directly to this GS1 brick"
+  "category_path": "Electronics > Storage Devices > External Solid State Drives",
+  "confidence": 0.85
 }
 ```
 
-If no candidate is a good match the LLM returns `"code": null` with `confidence: 0.0`.
-
-The LLM is provider-agnostic — see [05-llm-providers.md](05-llm-providers.md) for switching between Anthropic, OpenAI, Gemini, and Ollama.
+The `llm_node` strips markdown code fences before parsing (`removeprefix("```json")`).
 
 ---
 
-## Confidence Gate
+## Error Handling
 
-**File:** `src/classifier/pipeline/classify.py`
-
-```python
-effective_threshold = min_confidence (from request) ?? 0.75
-
-requires_review = confidence < effective_threshold or chosen_code is None
-```
-
-| confidence | what happens |
-|---|---|
-| ≥ 0.92 | Stage 1 exit — embedding match accepted, no LLM call |
-| 0.75 – 0.91 | Stage 2 ran, auto-accepted |
-| < 0.75 | Stage 2 ran, flagged as `requires_review = true` |
-| null code | Always flagged for review |
-
-The request can pass a custom `min_confidence` to tighten or loosen the gate per-call.
-
----
-
-## Orchestrator
-
-**File:** `src/classifier/pipeline/classify.py`
-
-The `classify_product()` function owns the full flow:
-
-1. Cache lookup
-2. Stage 1 embedding search
-3. Stage 2 LLM (conditional)
-4. Confidence gate
-5. `INSERT INTO classification_results`
-6. `INSERT INTO classification_audit`
-7. Redis cache write (if not flagged)
-8. Return `ClassifyResult`
-
----
-
-## Correcting a Result
-
-**File:** `src/classifier/api/corrections.py`
-
-When a human reviewer corrects a flagged result, they `POST /corrections` with the right taxonomy code. This:
-
-1. Inserts a row in `corrections`
-2. Sets `classification_results.requires_review = false`
-3. Writes a `"correction"` audit event
-
-Corrections feed back as training signal — future taxonomy re-loading + fine-tuning can use the corrections table as ground truth.
+- `embed_node` failure → sets `error`, downstream nodes skip gracefully
+- `web_search_node` failure → sets `web_context = ""`, pipeline continues
+- `llm_node` failure → sets `category_path = None`, `confidence = 0.0`, `error` message

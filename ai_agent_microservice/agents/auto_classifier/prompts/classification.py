@@ -1,47 +1,76 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
-_SYSTEM_PROMPT = """\
+_SYSTEM_BASE = """\
 You are a product category classifier for a PIM system.
+Return ONLY valid JSON — no markdown, no explanation outside the JSON.
+"""
 
-Given a product in JSON format, identify what the product is and classify it into the most accurate category.
+_PATH_A_SYSTEM = _SYSTEM_BASE + """
+You will receive a product description and a list of candidate categories from our database.
+Pick the single best category from the list provided.
 
-Return ONLY this JSON — no other text:
+Return:
 {
-  "category_path": "<top level> > <mid level> > <specific category>",
-  "code": "<taxonomy code or null>",
+  "category_path": "<exact path from the list>",
   "confidence": <0.0 to 1.0>,
-  "reasoning": "<one sentence why>"
+  "reasoning": "<one sentence>"
 }
+"""
 
-Notes:
-- category_path must always be a hierarchical path using " > " as separator
-- For GS1 and eCl@ss: fill code from your knowledge of that standard
-- For custom taxonomy: set code to null, focus on a clear descriptive category_path
-- confidence reflects how clearly the product data identifies the category\
+_PATH_B_SYSTEM = _SYSTEM_BASE + """
+You will receive a product description, web context about the product, and candidate categories from our database.
+Use the web context to better understand the product, then pick the single best category from the list provided.
+
+Return:
+{
+  "category_path": "<exact path from the list>",
+  "confidence": <0.0 to 1.0>,
+  "reasoning": "<one sentence>"
+}
+"""
+
+_PATH_C_SYSTEM = _SYSTEM_BASE + """
+You will receive a product description and web context about the product.
+No pre-defined categories matched. Generate the most accurate category path in L1 > L2 > L3 format.
+
+Return:
+{
+  "category_path": "<L1> > <L2> > <L3>",
+  "confidence": <0.0 to 1.0>,
+  "reasoning": "<one sentence>"
+}
 """
 
 
-def get_system_prompt() -> str:
-    return _SYSTEM_PROMPT
-
-
-def _clean_product(product: dict[str, Any]) -> dict[str, Any]:
-    """Remove only empty/null/false values. LLM decides what's relevant."""
-    return {
-        k: v
-        for k, v in product.items()
-        if v is not None and v != "" and v != 0 and v != 0.0 and v is not False
-    }
-
-
-def get_user_message(product: dict[str, Any], taxonomy_type: str) -> str:
-    cleaned = _clean_product(product)
-    product_json = json.dumps(cleaned, indent=2, default=str)
-
-    return (
-        f"Taxonomy: {taxonomy_type.upper()}\n\n"
-        f"Product:\n{product_json}"
+def _format_candidates(candidates: list[dict]) -> str:
+    return "\n".join(
+        f"{i+1}. {c['category_path']} (score: {c['score']:.2f})"
+        for i, c in enumerate(candidates)
     )
+
+
+def get_path_a_messages(product_text: str, candidates: list[dict]) -> tuple[str, str]:
+    user = (
+        f"Product:\n{product_text}\n\n"
+        f"Candidate categories:\n{_format_candidates(candidates)}"
+    )
+    return _PATH_A_SYSTEM, user
+
+
+def get_path_b_messages(
+    product_text: str, web_context: str, candidates: list[dict]
+) -> tuple[str, str]:
+    user = (
+        f"Product:\n{product_text}\n\n"
+        f"Web context:\n{web_context}\n\n"
+        f"Candidate categories:\n{_format_candidates(candidates)}"
+    )
+    return _PATH_B_SYSTEM, user
+
+
+def get_path_c_messages(product_text: str, web_context: str) -> tuple[str, str]:
+    user = (
+        f"Product:\n{product_text}\n\n"
+        f"Web context:\n{web_context}"
+    )
+    return _PATH_C_SYSTEM, user
