@@ -81,6 +81,8 @@ docs/
 
 # Project task lists
 project_task_list/product_description_generator/pim_ai_task_list.xlsx
+project_task_list/product_description_generator/pim_ai_meeting_related_notes/
+project_task_list/db_schema_design_proposal/
 
 # LibreOffice lock files
 .~lock.*
