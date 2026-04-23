@@ -1,0 +1,132 @@
+[
+  {
+    "pim_record": {
+      "productID": 705511,
+      "ipManufacturer": "UGREEN",
+      "coordGroupDescription": "SMB NETWORK/NAS DRV ENCL",
+      "productName": "2-BAY NASYNC DH2300",
+      "warranty": "1 year",
+      "productDescription": "2-BAY NASYNC DH2300",
+      "posDescription": "2-BAY NASYNC DH2300",
+      "productType": "",
+      "suggestedWebcategory": "",
+      "webManufacturer": "",
+      "copy1": "",
+      "vendorStyle": "95432",
+      "categorySpecificAttributes": []
+    },
+    "channel": "ecommerce",
+    "brand_voice": {
+      "tone": "professional",
+      "keywords": ["storage", "NAS", "network device"],
+      "avoid_words": ["cheap", "low quality"],
+      "max_title_length": 80,
+      "max_description_length": 500,
+      "locale": "en-GB"
+    }
+  },
+  {
+    "pim_record": {
+      "productID": 705517,
+      "ipManufacturer": "APPLE",
+      "coordGroupDescription": "APPLE DESKTOP SYSTEMS",
+      "productName": "MACSTUDIO E25 M4M/64/1TB",
+      "warranty": "1 year",
+      "productDescription": "MACSTUDIO E25 M4M/64/1TB",
+      "posDescription": "MACSTUDIO E25 M4M/64/1TB",
+      "productType": "",
+      "suggestedWebcategory": "",
+      "webManufacturer": "",
+      "copy1": "",
+      "vendorStyle": "15098309",
+      "categorySpecificAttributes": []
+    },
+    "channel": "ecommerce",
+    "brand_voice": {
+      "tone": "professional",
+      "keywords": ["desktop", "apple", "high performance"],
+      "avoid_words": ["cheap", "budget"],
+      "max_title_length": 80,
+      "max_description_length": 500,
+      "locale": "en-GB"
+    }
+  },
+  {
+    "pim_record": {
+      "productID": 705636,
+      "ipManufacturer": "APPLE",
+      "coordGroupDescription": "APPLE DESKTOP SYSTEMS",
+      "productName": "MAC MINI L24 M4/10/24/1TB",
+      "warranty": "1 year",
+      "productDescription": "MAC MINI L24 M4/10/24/1TB",
+      "posDescription": "MAC MINI L24 M4/10/24/1TB",
+      "productType": "",
+      "suggestedWebcategory": "",
+      "webManufacturer": "",
+      "copy1": "",
+      "vendorStyle": "Z1JX/6",
+      "categorySpecificAttributes": []
+    },
+    "channel": "ecommerce",
+    "brand_voice": {
+      "tone": "professional",
+      "keywords": ["compact desktop", "apple", "performance"],
+      "avoid_words": ["cheap"],
+      "max_title_length": 80,
+      "max_description_length": 500,
+      "locale": "en-GB"
+    }
+  },
+  {
+    "pim_record": {
+      "productID": 705173,
+      "ipManufacturer": "APPLE",
+      "coordGroupDescription": "APPLE DESKTOP SYSTEMS",
+      "productName": "MACSTUDIO E25 M4M/48/1TB",
+      "warranty": "1 year",
+      "productDescription": "MACSTUDIO E25 M4M/48/1TB",
+      "posDescription": "MACSTUDIO E25 M4M/48/1TB",
+      "productType": "",
+      "suggestedWebcategory": "",
+      "webManufacturer": "",
+      "copy1": "",
+      "vendorStyle": "15132594",
+      "categorySpecificAttributes": []
+    },
+    "channel": "ecommerce",
+    "brand_voice": {
+      "tone": "professional",
+      "keywords": ["apple desktop", "workstation", "performance"],
+      "avoid_words": ["cheap"],
+      "max_title_length": 80,
+      "max_description_length": 500,
+      "locale": "en-GB"
+    }
+  },
+  {
+    "pim_record": {
+      "productID": 705357,
+      "ipManufacturer": "APPLE",
+      "coordGroupDescription": "APPLE NOTEBOOKS",
+      "productName": "MBP14 L24 M4P12/48/1TB SV",
+      "warranty": "1 year",
+      "productDescription": "MBP14 L24 M4P12/48/1TB SV",
+      "posDescription": "MBP14 L24 M4P12/48/1TB SV",
+      "productType": "",
+      "suggestedWebcategory": "",
+      "webManufacturer": "",
+      "copy1": "",
+      "vendorStyle": "Z1FB/2",
+      "categorySpecificAttributes": []
+    },
+    "channel": "ecommerce",
+    "brand_voice": {
+      "tone": "professional",
+      "keywords": ["laptop", "macbook", "performance"],
+      "avoid_words": ["cheap"],
+      "max_title_length": 80,
+      "max_description_length": 500,
+      "locale": "en-GB"
+    }
+  }
+]
