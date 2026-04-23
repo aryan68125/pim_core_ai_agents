@@ -3505,18 +3505,56 @@ This is a separate structured event that records the business outcome of every a
   "status":     "success",
   "latency_ms": 1680,
   "llm_model":  "claude-sonnet-4-6",
+  "output_quality": {
+    "schema_valid":          true,
+    "title_length_ok":       true,
+    "description_length_ok": true,
+    "keywords_hit_rate":     0.85,
+    "finish_reason":         "end_turn"
+  },
   "created_at": "2026-04-23T09:25:33.882Z"
 }
+```
+
+**`output_quality` — why these five fields and not a single accuracy float:**
+
+True model accuracy requires ground truth — a known correct answer to compare the LLM output against. At runtime for a generative task, ground truth does not exist. Instead, `output_quality` records **proxy signals that are fully measurable at runtime** and together give a reliable picture of whether the model followed its instructions:
+
+| Field | Type | How measured | What it tells you |
+|---|---|---|---|
+| `schema_valid` | boolean | Did `json.loads()` succeed on the response? | Whether the model followed the JSON output format instruction |
+| `title_length_ok` | boolean | `len(title) <= brand_voice.max_title_length` | Whether the title constraint was respected |
+| `description_length_ok` | boolean | `len(description) <= brand_voice.max_description_length` | Whether the description constraint was respected |
+| `keywords_hit_rate` | float 0–1 | `keywords_found / total_keywords` from `brand_voice.keywords` | % of required brand keywords the model included in the output |
+| `finish_reason` | string | Returned by the LLM SDK (`end_turn`, `max_tokens`, `stop`) | Whether the model completed naturally or was cut off by the token limit |
+
+A `keywords_hit_rate` of `1.0` and `finish_reason = "end_turn"` with all boolean fields `true` means the model performed perfectly against measurable constraints. Any deviation is immediately visible in CloudWatch Logs Insights:
+
+```sql
+-- Find responses where the model was cut off by token limit
+fields timestamp, request_id, llm_model, output_quality.finish_reason
+| filter level = "AUDIT" and output_quality.finish_reason = "max_tokens"
+
+-- Find responses where required keywords were missed
+fields timestamp, company_id, output_quality.keywords_hit_rate
+| filter level = "AUDIT" and output_quality.keywords_hit_rate < 1.0
+| sort output_quality.keywords_hit_rate asc
+
+-- Average keyword hit rate per LLM model — compare model quality
+fields llm_model, output_quality.keywords_hit_rate
+| filter level = "AUDIT"
+| stats avg(output_quality.keywords_hit_rate) as avg_keyword_score by llm_model
+| sort avg_keyword_score desc
 ```
 
 **Why AUDIT is separate from DEBUG:**
 
 | | DEBUG | AUDIT |
 |---|---|---|
-| Purpose | Technical diagnosis | Business audit trail |
+| Purpose | Technical diagnosis | Business audit trail + output quality tracking |
 | Production? | Usually disabled (`LOG_LEVEL=INFO`) | Always on — never filtered |
-| Who reads it | Engineers debugging issues | Product, compliance, billing |
-| Fields | Raw payloads, token counts | company_id, action, status, latency |
+| Who reads it | Engineers debugging issues | Product, compliance, billing, QA |
+| Fields | Raw payloads, token counts | company_id, action, status, latency, output_quality |
 
 ---
 
@@ -3723,12 +3761,34 @@ Current state (from codebase audit): only 6 try/except blocks exist. Every file 
 
 #### Phase 3 — AUDIT Event Emission
 
-Every agent action that completes (success or failure) must emit one AUDIT event. The AUDIT event is emitted at the end of the request lifecycle — after the workflow resolves.
+Every agent action that completes (success or failure) must emit one AUDIT event. The AUDIT event is emitted at the end of the request lifecycle — after the workflow resolves and the result is available for quality scoring.
 
-| Where to emit | Trigger | Fields |
+**Where to emit:**
+
+| Location | Trigger | Core fields |
 |---|---|---|
 | `generate_description_from_pim()` in API route | After workflow resolves | `company_id`, `agent_id`, `action=generate`, `status`, `latency_ms`, `llm_model` |
 | `generate_description()` MCP tool | After tool resolves | Same fields |
+
+**How `output_quality` is computed before emitting:**
+
+The `output_quality` block is computed inline at the emit site using the `DescriptionResult` returned by the workflow and the `BrandVoice` config from the request. No external calls are needed — all five fields are derived from data already in memory:
+
+| Field | Source |
+|---|---|
+| `schema_valid` | `True` if workflow returned a `DescriptionResult` without raising `JSONDecodeError` |
+| `title_length_ok` | `len(result.title) <= request.brand_voice.max_title_length` |
+| `description_length_ok` | `len(result.description) <= request.brand_voice.max_description_length` |
+| `keywords_hit_rate` | `sum(1 for kw in brand_voice.keywords if kw.lower() in result.description.lower()) / len(brand_voice.keywords)` — returns `1.0` if keyword list is empty |
+| `finish_reason` | Passed through from `LLMClient.complete()` response metadata |
+
+**Status mapping:**
+
+| Condition | `status` value |
+|---|---|
+| Workflow returned `DescriptionResult` with no error | `success` |
+| Workflow returned error state (JSON parse failed, etc.) | `failed` |
+| Request escalated to human-in-the-loop review | `escalated` |
 
 ---
 
