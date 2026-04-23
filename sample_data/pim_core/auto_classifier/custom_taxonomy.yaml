@@ -1,0 +1,52 @@
+# Custom taxonomy sample — use this as your starting point for company-specific categories
+# Run: python -m agents.auto_classifier.taxonomy.loader custom
+
+- code: "IT-STOR-NAS"
+  name: "Network Attached Storage"
+  parent_code: "IT-STOR"
+  breadcrumb: "IT Equipment > Storage > Network Attached Storage"
+
+- code: "IT-STOR-SSD"
+  name: "Solid State Drives"
+  parent_code: "IT-STOR"
+  breadcrumb: "IT Equipment > Storage > Solid State Drives"
+
+- code: "IT-MEM-DDR5"
+  name: "DDR5 Memory Modules"
+  parent_code: "IT-MEM"
+  breadcrumb: "IT Equipment > Memory > DDR5 Memory Modules"
+
+- code: "TOOL-PWR-DRILL"
+  name: "Power Drills"
+  parent_code: "TOOL-PWR"
+  breadcrumb: "Tools > Power Tools > Power Drills"
+
+- code: "TOOL-PWR-GRIND"
+  name: "Angle Grinders"
+  parent_code: "TOOL-PWR"
+  breadcrumb: "Tools > Power Tools > Angle Grinders"
+
+- code: "TOOL-HAND-SPAN"
+  name: "Spanners and Wrenches"
+  parent_code: "TOOL-HAND"
+  breadcrumb: "Tools > Hand Tools > Spanners and Wrenches"
+
+- code: "PPE-RESP-DISP"
+  name: "Disposable Respirators"
+  parent_code: "PPE-RESP"
+  breadcrumb: "Safety & PPE > Respiratory Protection > Disposable Respirators"
+
+- code: "PPE-EYE-GOGGLE"
+  name: "Safety Goggles"
+  parent_code: "PPE-EYE"
+  breadcrumb: "Safety & PPE > Eye Protection > Safety Goggles"
+
+- code: "FAST-BOLT-HEX"
+  name: "Hex Bolts"
+  parent_code: "FAST-BOLT"
+  breadcrumb: "Fasteners > Bolts > Hex Bolts"
+
+- code: "FAST-NUT-HEX"
+  name: "Hex Nuts"
+  parent_code: "FAST-NUT"
+  breadcrumb: "Fasteners > Nuts > Hex Nuts"

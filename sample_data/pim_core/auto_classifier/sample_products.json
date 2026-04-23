@@ -1,0 +1,81 @@
+[
+  {
+    "productID": 705511,
+    "productName": "2-BAY NASYNC DH2300",
+    "shortSku": "968909",
+    "productDescription": "2-Bay NAS Enclosure with dual drive bays for SMB network storage",
+    "ipManufacturer": "UGREEN",
+    "coordGroupDescription": "SMB NETWORK/NAS DRV ENCL",
+    "expected_classification": {
+      "gs1_code": "10005471",
+      "gs1_name": "Storage Devices/Network Attached Storage Devices",
+      "confidence_expected": "high"
+    }
+  },
+  {
+    "productID": 801234,
+    "productName": "CORSAIR DDR5-6000 32GB KIT",
+    "shortSku": "CK3201",
+    "productDescription": "32GB (2x16GB) DDR5 6000MHz CL36 desktop memory kit with XMP 3.0 support",
+    "ipManufacturer": "CORSAIR",
+    "coordGroupDescription": "MEMORY MODULES",
+    "expected_classification": {
+      "gs1_code": "10005394",
+      "gs1_name": "Computer Memory/RAM Modules",
+      "confidence_expected": "high"
+    }
+  },
+  {
+    "productID": 802100,
+    "productName": "BOSCH GSB 18V-55 COMBI DRILL",
+    "shortSku": "BG1855",
+    "productDescription": "18V brushless combi drill with 2x2.0Ah batteries, charger, 55Nm torque, 13mm chuck",
+    "ipManufacturer": "BOSCH",
+    "coordGroupDescription": "POWER TOOLS",
+    "expected_classification": {
+      "gs1_code": "10004182",
+      "gs1_name": "Drills/Power Drills",
+      "confidence_expected": "high"
+    }
+  },
+  {
+    "productID": 803500,
+    "productName": "3M N95 PARTICULATE RESPIRATOR 8210",
+    "shortSku": "3MN95",
+    "productDescription": "NIOSH-approved N95 disposable respirator, flat-fold design, pack of 20",
+    "ipManufacturer": "3M",
+    "coordGroupDescription": "SAFETY PPE",
+    "expected_classification": {
+      "gs1_code": "10006712",
+      "gs1_name": "Respiratory Protection/Disposable Respirators",
+      "confidence_expected": "high"
+    }
+  },
+  {
+    "productID": 804000,
+    "productName": "SAMSUNG 990 PRO 2TB NVME SSD",
+    "shortSku": "SAM990P2T",
+    "productDescription": "2TB PCIe 4.0 NVMe M.2 2280 SSD, 7450MB/s read, 6900MB/s write, for PS5 and PC",
+    "ipManufacturer": "SAMSUNG",
+    "coordGroupDescription": "SOLID STATE DRIVES",
+    "expected_classification": {
+      "gs1_code": "10005395",
+      "gs1_name": "Storage Devices/Solid State Drives",
+      "confidence_expected": "high"
+    }
+  },
+  {
+    "productID": 810001,
+    "productName": "AMBIGUOUS WIDGET TYPE A-77",
+    "shortSku": "AW77",
+    "productDescription": "Multi-purpose precision component for industrial assembly applications",
+    "ipManufacturer": "GENERIC IND",
+    "coordGroupDescription": "INDUSTRIAL COMPONENTS",
+    "expected_classification": {
+      "gs1_code": null,
+      "gs1_name": null,
+      "confidence_expected": "low",
+      "note": "Deliberately vague — should trigger HITL review flag"
+    }
+  }
+]

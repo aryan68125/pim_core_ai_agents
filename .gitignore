@@ -21,14 +21,16 @@ lib64/
 .Python
 
 # Virtual environments
-.env
 .venv
+.venv/
 env/
 venv/
 ENV/
 ai_agent_microservice/venv/
+ai_agent_microservice/.venv/
 
 # Environment variables
+.env
 .env.local
 .env.*.local
 *.env
@@ -90,6 +92,14 @@ project_task_list/db_schema_design_proposal/
 # Database
 *.sqlite
 *.db
+
+# Alembic auto-generated (keep env.py and script.py.mako, ignore compiled)
+alembic/versions/__pycache__/
+
+# Taxonomy data files (large downloads, not committed)
+ai_agent_microservice/taxonomy_data/
+sample_data/**/*.zip
+sample_data/**/*.xml
 
 # Secrets & keys
 *.pem
