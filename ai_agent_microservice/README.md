@@ -29,20 +29,53 @@ A production-ready FastAPI microservice that powers AI agents for a Product Info
 
 **Python:** 3.13.7 (tested with CPython from Miniconda)
 
+---
+
+### Tech Stack by Layer
+
+| Layer | Technology | Role |
+|---|---|---|
+| **Web Framework** | FastAPI | REST API — route definitions, request/response handling, automatic OpenAPI docs |
+| **Web Framework** | Uvicorn | ASGI server — runs the FastAPI app in production and development |
+| **Web Framework** | Starlette | ASGI toolkit underlying FastAPI — middleware, routing, request lifecycle |
+| **AI / LLM Provider** | Anthropic Claude SDK | SDK for Claude models (Sonnet, Opus, Haiku) |
+| **AI / LLM Provider** | OpenAI SDK | SDK for GPT-4o, o1, o3, o4 models |
+| **AI / LLM Provider** | Google Generative AI SDK | SDK for Gemini models |
+| **Agent Orchestration** | LangGraph | StateGraph-based agent workflow — each agent is a directed computation graph |
+| **Agent Orchestration** | LangChain Core | Base abstractions (messages, runnables) used by LangGraph |
+| **Data Validation & Config** | Pydantic | Runtime type validation for all request/response models and internal data schemas |
+| **Data Validation & Config** | Pydantic-Settings | Loads and validates environment variables from `.env` at startup |
+| **MCP Protocol** | FastMCP | Registers agent tools as Model Context Protocol endpoints — lets external AI agents call this service |
+| **Security** | PyJWT | JWT encoding and decoding — used for service-to-service authentication |
+| **HTTP Client** | HTTPX | Async HTTP client — used by FastAPI test client and internal HTTP calls |
+| **Testing** | pytest | Test runner |
+| **Testing** | pytest-asyncio | Async test support for FastAPI async routes |
+| **Testing** | pytest-cov | Test coverage reporting |
+
+---
+
+### All Dependencies
+
 **Core runtime dependencies:**
 
 | Package | Version | Purpose |
 |---|---|---|
-| `fastapi` | 0.135.3 | REST API framework |
+| `fastapi` | 0.136.0 | REST API framework |
 | `uvicorn` | 0.44.0 | ASGI server |
+| `starlette` | 1.0.0 | ASGI toolkit underlying FastAPI |
 | `pydantic` | 2.13.1 | Data validation and serialisation |
 | `pydantic-settings` | 2.13.1 | `.env` file config loading |
-| `langgraph` | 1.1.6 | Agent orchestration graph |
-| `anthropic` | 0.95.0 | Anthropic Claude SDK |
+| `langgraph` | 1.1.8 | Agent orchestration graph |
+| `langchain-core` | 1.3.0 | Base abstractions used by LangGraph |
+| `anthropic` | 0.96.0 | Anthropic Claude SDK |
+| `openai` | 2.32.0 | OpenAI GPT SDK |
+| `google-generativeai` | 0.8.6 | Google Gemini SDK |
 | `fastmcp` | 3.2.4 | Model Context Protocol tool registration |
-| `httpx` | 0.28.1 | Async HTTP client (used by test client) |
+| `PyJWT` | — | JWT encoding / decoding for service-to-service auth |
+| `httpx` | 0.28.1 | Async HTTP client (used by test client and internal calls) |
+| `python-dotenv` | — | `.env` file parsing |
 
-**Optional provider packages (install only what you need):**
+**Optional provider packages — install only what you need:**
 
 ```bash
 pip install openai              # for GPT-4o, o1, o3, o4 models
