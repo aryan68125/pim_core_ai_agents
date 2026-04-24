@@ -105,3 +105,7 @@ sample_data/**/*.xml
 *.pem
 *.key
 secrets/
+
+# Local knowledge base & personal documentation
+project_knowledge_base/
+project_related_documentation_by_me/
