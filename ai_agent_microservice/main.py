@@ -13,7 +13,7 @@ from agents.product_description_generator.routes.agent_registry import router as
 from agents.product_description_generator.routes.product_description_generator_api_route import router as pim_router
 from pim_core.llm.registry import agent_model_registry
 from pim_core.utils.all_agents import AllAgents
- 
+
 structlog.configure(
     processors=[
         structlog.stdlib.add_log_level,
